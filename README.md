@@ -87,10 +87,18 @@ Claude    →    Claude     →   全链路转换
 - **测试** —— 在线对话测试，支持 OpenAI/Anthropic 协议切换、流式/非流式
 - **用量统计** —— 详细指标与分组视图
 - **调用日志** —— 每次调用详情，可展开看 prompt/response/缓存命中
+- **检查更新** —— 自动更新单文件版本（下载 → 校验 → 替换 → 重启）
 
 ### 🔐 鉴权
 - 多 API Key 管理，每 key 可配 `allowed_models`（支持 `*` 通配）
 - 开放模式（无 key 配置时不鉴权，便于本地开发）
+
+### 🔄 自动更新
+发布版支持设置页一键升级，无需重新下载安装包：
+- **检查更新** —— 查询 GitHub Releases 最新版，显示版本号、更新说明与下载大小
+- **立即更新** —— 下载平台匹配的单文件 → `.sha256` 校验 → 原子替换 exe → 自动重启（数据与配置保留，headless 模式不变）
+- **升级安全** —— 校验不符自动中止；更新前自动备份数据库，库损坏自动回滚最新备份
+- **限 macOS `.app`** —— 桌面 `.app` 包装形态只读不可替换，请手动下载 `.dmg`；headless 二进制可正常自动更新
 
 ---
 
@@ -229,6 +237,8 @@ chmod +x YuSwitch && ./YuSwitch
 ```
 
 访问 **http://localhost:5078** 进入管理界面，配置你的上游服务。
+
+> 💡 升级：设置页 →「检查更新」→「立即更新」，自动下载新版本并重启（数据保留）。macOS `.app` 请手动下载 `.dmg`。
 
 ### 从源码运行
 
@@ -372,6 +382,9 @@ builder.Services.AddDbContextFactory<AppDbContext>(opt =>
 | GET | `/admin/call-logs?limit=50` | 调用日志 |
 | GET | `/admin/dispatch-trace` | 调度追踪 |
 | POST | `/admin/seed` | 初始化示例配置 |
+| POST | `/admin/system/restart` | 重启服务（新进程重新加载配置）|
+| GET | `/admin/system/update/check` | 检查新版本 |
+| POST | `/admin/system/update/apply` | 应用更新（下载校验替换重启）|
 
 ---
 
@@ -408,11 +421,11 @@ dotnet publish YuSwitch.csproj \
   -o ./publish
 ```
 
-产物为单个 `YuSwitch.exe`（约 49MB，含 .NET 运行时 + Blazor 静态资源嵌入），无需安装 .NET 即可运行。
+产物为单个 `YuSwitch.exe`（约 100MB，含 .NET 运行时 + Blazor 静态资源嵌入），无需安装 .NET 即可运行。
 
 支持的目标平台（RID 与目标框架 `-f` 对应）：
 - `win-x64` / `win-arm64` → `-f net8.0-windows`（桌面 GUI + 网关）
-- `linux-x64` / `linux-arm64` / `osx-x64` → `-f net8.0`（headless 网关）
+- `linux-x64` / `linux-arm64` / `osx-x64` / `osx-arm64` → `-f net8.0`（headless 网关）
 
 ### GitHub Actions 自动发布
 
@@ -423,6 +436,6 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Action 自动构建 5 个平台版本（Windows x64/ARM64、Linux x64/ARM64、macOS x64）并发布到 [Releases](https://github.com/geekwind/YuSwitch/releases)。
+Action 自动构建 6 个平台版本（Windows x64/ARM64、Linux x64/ARM64、macOS x64/ARM64）并发布到 [Releases](https://github.com/geekwind/YuSwitch/releases)，每个资产附带 `.sha256` 校验文件，设置页「检查更新」可直接一键升级。
 
 详细使用说明见 [USAGE.md](USAGE.md)。
