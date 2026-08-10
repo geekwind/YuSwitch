@@ -126,6 +126,40 @@ public static class AdminEndpoints
         return JsonSerializer.Serialize(merged);
     }
 
+    /// <summary>Mask the per-service Tavily key inside WebSearchJson, mirroring
+    /// MaskCredentialsJson — the admin UI must never ship the plaintext key.
+    /// Unparsable or keyless config passes through untouched.</summary>
+    private static string MaskWebSearchJson(string json)
+    {
+        try
+        {
+            var cfg = JsonSerializer.Deserialize<WebSearchConfig>(json);
+            if (cfg is null || string.IsNullOrWhiteSpace(cfg.ApiKey)) return json;
+            cfg.ApiKey = MaskSecret(cfg.ApiKey);
+            return JsonSerializer.Serialize(cfg);
+        }
+        catch { return json; }
+    }
+
+    /// <summary>Merge incoming web-search config over stored: a masked ApiKey
+    /// (round-tripped from ListServices) means "unchanged" — keep the stored key;
+    /// only a genuinely edited key overwrites. Empty/absent key clears the
+    /// per-service key (fall back to the global setting). Same contract as
+    /// MergeCredentialsJson, applied to WebSearchConfig.ApiKey.</summary>
+    private static string MergeWebSearchJson(string storedJson, string incomingJson)
+    {
+        try
+        {
+            var stored = JsonSerializer.Deserialize<WebSearchConfig>(storedJson);
+            var incoming = JsonSerializer.Deserialize<WebSearchConfig>(incomingJson);
+            if (incoming is null) return storedJson;
+            if (stored is not null && incoming.ApiKey is not null && LooksMasked(incoming.ApiKey))
+                incoming.ApiKey = stored.ApiKey;   // user didn't touch it → keep stored
+            return JsonSerializer.Serialize(incoming);
+        }
+        catch { return storedJson; }
+    }
+
     private static async Task<IResult> ListServices(
         [FromServices] IDbContextFactory<AppDbContext> dbf)
     {
@@ -133,8 +167,13 @@ public static class AdminEndpoints
         var services = await db.Services.Include(s => s.Models).AsNoTracking().ToListAsync();
         // Never ship plaintext upstream keys to the browser: mask in place (the
         // entities are detached) and let UpdateService merge masked values back.
+        // This covers both the provider credentials and the per-service web
+        // search Tavily key.
         foreach (var s in services)
+        {
             s.CredentialsJson = MaskCredentialsJson(s.CredentialsJson);
+            s.WebSearchJson = MaskWebSearchJson(s.WebSearchJson);
+        }
         return Results.Json(services, AdminJsonOpts);
     }
 
@@ -171,6 +210,7 @@ public static class AdminEndpoints
         await db.SaveChangesAsync();
         await config.ReloadAsync();
         svc.CredentialsJson = MaskCredentialsJson(svc.CredentialsJson);
+        svc.WebSearchJson = MaskWebSearchJson(svc.WebSearchJson);
         return Results.Json(svc);
     }
 
@@ -195,12 +235,15 @@ public static class AdminEndpoints
         existing.LimitJson = svc.LimitJson;
         existing.ModelRedirectJson = svc.ModelRedirectJson;
         existing.ModelMapJson = svc.ModelMapJson;
-        existing.WebSearchJson = svc.WebSearchJson;
+        // Same masked-means-unchanged contract for the per-service web search
+        // Tavily key; only a genuinely edited key overwrites the stored one.
+        existing.WebSearchJson = MergeWebSearchJson(existing.WebSearchJson, svc.WebSearchJson);
         existing.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
         await config.ReloadAsync();
         // Post-save, pre-response masking only touches the in-memory copy.
         existing.CredentialsJson = MaskCredentialsJson(existing.CredentialsJson);
+        existing.WebSearchJson = MaskWebSearchJson(existing.WebSearchJson);
         return Results.Json(existing);
     }
 
