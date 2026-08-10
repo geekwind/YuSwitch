@@ -4,7 +4,7 @@
 
 ### 1. 下载
 
-从 [Releases](https://github.com/geekwind/easy-ai-gateway/releases) 页面下载对应平台的版本：
+从 [Releases](https://github.com/geekwind/YuSwitch/releases) 页面下载对应平台的版本：
 
 | 平台 | 文件 |
 |---|---|
@@ -233,8 +233,8 @@ WantedBy=multi-user.target
 
 ```bash
 # 安装 .NET 8 SDK
-git clone https://github.com/geekwind/easy-ai-gateway.git
-cd easy-ai-gateway
+git clone https://github.com/geekwind/YuSwitch.git
+cd YuSwitch
 
 # 开发运行（多目标项目需指定框架：net8.0-windows 带桌面 GUI，net8.0 为 headless）
 dotnet run -f net8.0-windows

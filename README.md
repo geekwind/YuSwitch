@@ -4,10 +4,10 @@
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-win%7Clinux%7Cosx-lightgrey)](#)
-[![Release](https://img.shields.io/badge/release-single--file-success)](https://github.com/geekwind/easy-ai-gateway/releases)
+[![Release](https://img.shields.io/badge/release-single--file-success)](https://github.com/geekwind/YuSwitch/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](#)
 
-📚 [使用说明](USAGE.md) · 📦 [下载](https://github.com/geekwind/easy-ai-gateway/releases) · 🏗️ [架构图](#-架构)
+📚 [使用说明](USAGE.md) · 📦 [下载](https://github.com/geekwind/YuSwitch/releases) · 🏗️ [架构图](#-架构)
 
 ---
 
@@ -218,7 +218,7 @@ YuSwitch/
 
 ### 下载运行（无需 .NET 环境）
 
-从 [Releases](https://github.com/geekwind/easy-ai-gateway/releases) 下载对应平台的单文件版本：
+从 [Releases](https://github.com/geekwind/YuSwitch/releases) 下载对应平台的单文件版本：
 
 ```bash
 # Windows: 解压后运行
@@ -423,6 +423,6 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Action 自动构建 5 个平台版本（Windows x64/ARM64、Linux x64/ARM64、macOS x64）并发布到 [Releases](https://github.com/geekwind/easy-ai-gateway/releases)。
+Action 自动构建 5 个平台版本（Windows x64/ARM64、Linux x64/ARM64、macOS x64）并发布到 [Releases](https://github.com/geekwind/YuSwitch/releases)。
 
 详细使用说明见 [USAGE.md](USAGE.md)。
