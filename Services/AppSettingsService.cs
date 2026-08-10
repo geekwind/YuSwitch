@@ -55,6 +55,11 @@ public class AppSettingsService
     // WebSearchConfig.ApiKey is empty.
     public const string KeyWebSearchTavilyKey = "web_search_tavily_key";
 
+    // Self-update source. Empty = official GitHub Releases (geekwind/YuSwitch).
+    // Overridable for mirrors or local testing; must point at a JSON document
+    // shaped like the GitHub releases/latest payload.
+    public const string KeyUpdateBaseUrl = "update_base_url";
+
     public const string DefaultAppName = "禹枢";
     public const string DefaultSubtitle = "AI 网关";
 
@@ -126,6 +131,9 @@ public class AppSettingsService
     /// <summary>Global Tavily API key for gateway-side web search. Empty = the
     /// gateway still strips web_search tools but performs no search.</summary>
     public string WebSearchTavilyKey => Get(KeyWebSearchTavilyKey, "");
+
+    /// <summary>Self-update source URL. Empty = official GitHub Releases.</summary>
+    public string UpdateBaseUrl => Get(KeyUpdateBaseUrl, "");
 
     private double GetD(string key, double fallback, double min, double max) =>
         double.TryParse(Get(key, ""), System.Globalization.NumberStyles.Float,

@@ -44,6 +44,15 @@ var forceHeadless = args.Any(a => a.Equals("--headless", StringComparison.Ordina
 // then boots fresh with the new settings. Strip BOTH the flag and its value,
 // the same way a bare switch would otherwise swallow the next argument.
 int? restartOfPid = null;
+// Self-update control flags (spawned by UpdateService's staged new binary).
+// --install-self <stageDir> <installAt>: this process is the freshly downloaded
+// binary; after waiting for the old PID, swap ourselves over the real exe and
+// relaunch it. --cleanup-stage <dir>: best-effort remove the leftover staging
+// dir after startup. All are stripped from the args the relaunched process sees.
+bool installSelf = false;
+string? updateStageDir = null;
+string? updateInstallAt = null;
+string? updateCleanupStage = null;
 var filtered = new List<string>(args.Length);
 for (var i = 0; i < args.Length; i++)
 {
@@ -57,6 +66,10 @@ for (var i = 0; i < args.Length; i++)
         i++; // consume the value
         continue;
     }
+    if (a.Equals("--install-self", StringComparison.OrdinalIgnoreCase)) { installSelf = true; continue; }
+    if (a.Equals("--stage", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { updateStageDir = args[i + 1]; i++; continue; }
+    if (a.Equals("--install-at", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { updateInstallAt = args[i + 1]; i++; continue; }
+    if (a.Equals("--cleanup-stage", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { updateCleanupStage = args[i + 1]; i++; continue; }
     filtered.Add(a);
 }
 var filteredArgs = filtered.ToArray();
@@ -89,6 +102,69 @@ if (restartOfPid is int prevPid)
     Log.Information("Previous process exited; continuing startup");
 }
 
+// --- Self-update: swap the staged new binary over the running exe and relaunch.
+// Runs BEFORE any EF/config/GUI/port-bind init: the old process (waited on
+// above) has exited, so the real exe is unlocked and the port/mutex are free.
+// Windows locks a running exe, so we Copy ourselves (source is read-shared)
+// onto the real path; POSIX allows an atomic Move (the running process keeps
+// its old inode). On any failure, relaunch the real path unchanged so the app
+// still comes back up (a plain restart) rather than lingering from the stage. ---
+if (installSelf)
+{
+    if (string.IsNullOrEmpty(updateInstallAt) || string.IsNullOrEmpty(updateStageDir))
+    {
+        Log.Error("Self-update: missing install info (at={At}, stage={Stage}); falling back to restart", updateInstallAt, updateStageDir);
+    }
+    else
+    {
+        // The headless/--no-gui switches were stripped from filteredArgs (a bare
+        // switch would otherwise swallow the next arg in CreateBuilder), so re-add
+        // --headless when we came from a headless run to preserve the original mode.
+        var relaunchArgs = forceHeadless
+            ? filteredArgs.Append("--headless").ToArray()
+            : filteredArgs;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                File.Copy(Environment.ProcessPath!, updateInstallAt, overwrite: true);
+            else
+                File.Move(Environment.ProcessPath!, updateInstallAt, overwrite: true);
+            Log.Information("Self-update: replaced {Path}, relaunching new binary", updateInstallAt);
+            StartRelaunch(updateInstallAt, relaunchArgs, updateStageDir);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Self-update swap failed; falling back to plain restart");
+            try { StartRelaunch(updateInstallAt, relaunchArgs, null); }
+            catch (Exception ex2) { Log.Error(ex2, "Self-update fallback restart also failed"); }
+        }
+        Environment.Exit(0);
+    }
+}
+
+// Best-effort cleanup of the leftover staging dir. The staging process exits
+// right after spawning us, but on Windows its exe file stays locked until that
+// process fully tears down, so a single attempt can race it — retry briefly.
+if (!string.IsNullOrEmpty(updateCleanupStage))
+{
+    var toClean = updateCleanupStage;
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(toClean))
+                    Directory.Delete(toClean, true);
+                return;
+            }
+            catch { /* stage dir still locked; retry */ }
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+    });
+}
+
 // --- EF Core (SQLite default, zero-config) ---
 var dbPath = builder.Configuration["Database:Path"] ?? "simpleone.db";
 builder.Services.AddDbContextFactory<AppDbContext>(opt =>
@@ -101,6 +177,7 @@ builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<AppVersionService>();
 builder.Services.AddSingleton<ToastService>();
 builder.Services.AddSingleton<ApiKeyLimiter>();
+builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddHostedService<HealthProbeService>();
 
 // --- Real-time notifications for dashboard auto-refresh ---
@@ -124,6 +201,16 @@ builder.Services.AddHttpClient("openai", c =>
 builder.Services.AddHttpClient("tavily", c =>
 {
     c.Timeout = TimeSpan.FromSeconds(15);
+});
+
+// --- HTTP client for self-update (GitHub Releases API + asset downloads).
+// Check requests are short (20s); large asset downloads get a per-instance
+// longer timeout in UpdateService. Auto-redirect (default) follows the CDN. ---
+builder.Services.AddHttpClient("github", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(20);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("YuSwitch-updater");
+    c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 });
 
 // --- CORS (open gateway: allow any origin for the API endpoints) ---
@@ -206,31 +293,74 @@ var listenPort = AppSettingsService.DefaultListenPort;
 using (var scope = app.Services.CreateScope())
 {
     var dbf = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+    // --- DB self-heal pre-flight (小白-friendly) ---
+    // Runs on its own short-lived connection BEFORE EF opens/migrates anything:
+    //  1. existing healthy DB → rolling backup (SQLite online BackupDatabase,
+    //     consistent even in WAL mode) so a failed upgrade can be rolled back by
+    //     swapping the newest simpleone.db.bak-* back in;
+    //  2. corrupt DB → auto-restore the newest backup;
+    //  3. corrupt with no backup, or a migration failure (below) → stop with a
+    //     clear message instead of a silent crash / half-migrated DB.
+    var dbFile = ResolveDbFile(builder.Configuration["Database:Path"] ?? "simpleone.db");
+    if (dbFile is not null && File.Exists(dbFile))
+    {
+        if (!await DbIntegrityOkAsync(dbFile))
+        {
+            Log.Error("Database integrity check FAILED on {Path}; attempting restore from newest backup", dbFile);
+            var restoreError = TryRestoreNewestBackup(dbFile);
+            if (restoreError is not null || !await DbIntegrityOkAsync(dbFile))
+                FatalDbError("数据库已损坏，且无法自动恢复："
+                    + (restoreError ?? "恢复后的文件仍然损坏。"));
+            else
+                Log.Information("Database restored from newest backup after integrity failure");
+        }
+        else
+        {
+            var backupFile = await CreateDbBackupAsync(dbFile);
+            if (backupFile is not null)
+                Log.Information("Database backed up to {Backup}", backupFile);
+            PruneDbBackups(dbFile, keep: 5);
+        }
+    }
+
     await using var db = await dbf.CreateDbContextAsync();
-    await db.Database.EnsureCreatedAsync();
-    // EnsureCreated only builds the schema on a fresh DB; for an existing DB it
-    // won't add tables introduced later. Create the Settings table idempotently.
-    await db.Database.ExecuteSqlRawAsync(
-        """CREATE TABLE IF NOT EXISTS "Settings" ("Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "Key" TEXT NOT NULL, "Value" TEXT NOT NULL);""");
-    await db.Database.ExecuteSqlRawAsync(
-        """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Settings_Key" ON "Settings" ("Key");""");
-    // Index usage logs by timestamp for time-bucketed dashboards (no-op on
-    // fresh DBs, which already get the index via the EF model configuration).
-    await db.Database.ExecuteSqlRawAsync(
-        """CREATE INDEX IF NOT EXISTS "IX_UsageLogs_Timestamp" ON "UsageLogs" ("Timestamp");""");
-    // Add UpstreamModel to existing UsageLogs tables (no-op on fresh DBs).
-    await AddColumnIfMissingAsync(db, "UsageLogs", "UpstreamModel", "TEXT NOT NULL DEFAULT ''");
-    // Cache/reasoning usage columns added later — migrate older DBs that
-    // predate them, else SaveChangesAsync throws "no such column" and the
-    // background drainer silently drops the whole log row. Fresh DBs (EnsureCreated)
-    // already have them, so these are no-ops there.
-    await AddColumnIfMissingAsync(db, "UsageLogs", "ReasoningTokens", "INTEGER NOT NULL DEFAULT 0");
-    await AddColumnIfMissingAsync(db, "UsageLogs", "CacheCreationTokens", "INTEGER NOT NULL DEFAULT 0");
-    await AddColumnIfMissingAsync(db, "UsageLogs", "CacheReadTokens", "INTEGER NOT NULL DEFAULT 0");
-    await AddColumnIfMissingAsync(db, "UsageLogs", "CacheHit", "INTEGER NOT NULL DEFAULT 0");
-    // Per-service web search config column (idempotent; fresh DBs get it via
-    // the EF model, older DBs via ALTER).
-    await AddColumnIfMissingAsync(db, "Services", "WebSearchJson", "TEXT NOT NULL DEFAULT '{}'");
+    try
+    {
+        await db.Database.EnsureCreatedAsync();
+        // EnsureCreated only builds the schema on a fresh DB; for an existing DB it
+        // won't add tables introduced later. Create the Settings table idempotently.
+        await db.Database.ExecuteSqlRawAsync(
+            """CREATE TABLE IF NOT EXISTS "Settings" ("Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "Key" TEXT NOT NULL, "Value" TEXT NOT NULL);""");
+        await db.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Settings_Key" ON "Settings" ("Key");""");
+        // Index usage logs by timestamp for time-bucketed dashboards (no-op on
+        // fresh DBs, which already get the index via the EF model configuration).
+        await db.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_UsageLogs_Timestamp" ON "UsageLogs" ("Timestamp");""");
+        // Add UpstreamModel to existing UsageLogs tables (no-op on fresh DBs).
+        await AddColumnIfMissingAsync(db, "UsageLogs", "UpstreamModel", "TEXT NOT NULL DEFAULT ''");
+        // Cache/reasoning usage columns added later — migrate older DBs that
+        // predate them, else SaveChangesAsync throws "no such column" and the
+        // background drainer silently drops the whole log row. Fresh DBs (EnsureCreated)
+        // already have them, so these are no-ops there.
+        await AddColumnIfMissingAsync(db, "UsageLogs", "ReasoningTokens", "INTEGER NOT NULL DEFAULT 0");
+        await AddColumnIfMissingAsync(db, "UsageLogs", "CacheCreationTokens", "INTEGER NOT NULL DEFAULT 0");
+        await AddColumnIfMissingAsync(db, "UsageLogs", "CacheReadTokens", "INTEGER NOT NULL DEFAULT 0");
+        await AddColumnIfMissingAsync(db, "UsageLogs", "CacheHit", "INTEGER NOT NULL DEFAULT 0");
+        // Per-service web search config column (idempotent; fresh DBs get it via
+        // the EF model, older DBs via ALTER).
+        await AddColumnIfMissingAsync(db, "Services", "WebSearchJson", "TEXT NOT NULL DEFAULT '{}'");
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Database migration failed; stopping startup to avoid a half-migrated DB");
+        FatalDbError("数据库升级失败，为避免数据损坏已停止启动。"
+            + "可把目录下最新一份 simpleone.db.bak-* 改名为 simpleone.db 后重启；"
+            + "或删除 simpleone.db 让应用重建（会丢失全部配置）。");
+        return;
+    }
+
     var config = scope.ServiceProvider.GetRequiredService<ConfigService>();
     await config.ReloadAsync();
     var appSettings = scope.ServiceProvider.GetRequiredService<AppSettingsService>();
@@ -414,5 +544,139 @@ static void WaitForProcessExit(int pid, TimeSpan timeout)
         catch (System.ComponentModel.Win32Exception) { return; } // access denied / gone
         Thread.Sleep(300);
     }
+}
+
+// Launches the (already swapped-in) real exe. CWD is the exe's install dir so
+// the relaunched process starts in the right place; its Program.cs top re-pins
+// to GetAppDataDir() anyway. args = original command line minus internal flags.
+static void StartRelaunch(string exe, string[] args, string? cleanupStage)
+{
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = exe,
+        UseShellExecute = false,
+        WorkingDirectory = Path.GetDirectoryName(exe) ?? AppContext.BaseDirectory,
+    };
+    foreach (var a in args) psi.ArgumentList.Add(a);
+    if (cleanupStage is not null)
+    {
+        psi.ArgumentList.Add("--cleanup-stage");
+        psi.ArgumentList.Add(cleanupStage);
+    }
+    System.Diagnostics.Process.Start(psi);
+}
+
+// Absolute path of the SQLite file for the configured Database:Path, or null
+// for in-memory / non-file connection strings.
+static string? ResolveDbFile(string dbPath)
+{
+    if (dbPath.Contains(":memory:", StringComparison.OrdinalIgnoreCase))
+        return null;
+    return Path.GetFullPath(dbPath);
+}
+
+// PRAGMA integrity_check on a short-lived standalone connection. Unopenable or
+// any non-"ok" result counts as unhealthy.
+static async Task<bool> DbIntegrityOkAsync(string dbFile)
+{
+    try
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbFile}");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA integrity_check;";
+        var res = await cmd.ExecuteScalarAsync();
+        return string.Equals(Convert.ToString(res), "ok", StringComparison.OrdinalIgnoreCase);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Could not open database for integrity check on {Path}", dbFile);
+        return false;
+    }
+}
+
+// Rolling backup of a healthy DB via SQLite's online backup API — a consistent
+// snapshot even under WAL. Timestamped name; the newest *.bak-* is the restore
+// point. Best effort: a failed backup only logs a warning.
+static async Task<string?> CreateDbBackupAsync(string dbFile)
+{
+    try
+    {
+        var dest = $"{dbFile}.bak-{DateTime.Now:yyyyMMdd-HHmmss}";
+        await using var source = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbFile}");
+        await source.OpenAsync();
+        await using var destConn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dest}");
+        await destConn.OpenAsync();
+        source.BackupDatabase(destConn); // runs to completion synchronously
+        return dest;
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Database backup failed; continuing without a snapshot");
+        return null;
+    }
+}
+
+// Replaces the (corrupt) DB with the newest timestamped backup. Deletes any
+// stale WAL/SHM sidecars first, else SQLite could replay old journal data over
+// the restored file. Returns null on success, or a user-facing error message.
+static string? TryRestoreNewestBackup(string dbFile)
+{
+    try
+    {
+        var dir = Path.GetDirectoryName(dbFile) ?? ".";
+        var pattern = Path.GetFileName(dbFile) + ".bak-*";
+        var newest = Directory.GetFiles(dir, pattern, SearchOption.TopDirectoryOnly)
+            .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (newest is null)
+            return "未找到任何备份文件。";
+        File.Copy(newest, dbFile, overwrite: true);
+        foreach (var ext in new[] { "-wal", "-shm" })
+        {
+            var side = dbFile + ext;
+            if (File.Exists(side)) File.Delete(side);
+        }
+        return null;
+    }
+    catch (Exception ex)
+    {
+        return "恢复失败：" + ex.Message;
+    }
+}
+
+// Keeps only the newest `keep` backups; older ones are deleted.
+static void PruneDbBackups(string dbFile, int keep)
+{
+    try
+    {
+        var dir = Path.GetDirectoryName(dbFile) ?? ".";
+        var pattern = Path.GetFileName(dbFile) + ".bak-*";
+        foreach (var old in Directory.GetFiles(dir, pattern, SearchOption.TopDirectoryOnly)
+            .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+            .Skip(keep))
+        {
+            File.Delete(old);
+        }
+    }
+    catch { /* best effort */ }
+}
+
+// Friendly fatal error for a DB problem: always logs loudly; on an interactive
+// Windows desktop launch also pops a message box. Ends the process (exit 1).
+static void FatalDbError(string detail)
+{
+    Log.Error("Fatal database error: {Detail}", detail);
+#if WINDOWS
+    if (OperatingSystem.IsWindows() && Environment.UserInteractive)
+    {
+        System.Windows.Forms.MessageBox.Show(
+            "YuSwitch 启动失败：数据库异常。\n\n" + detail + "\n\n（详见 logs/easy-gateway-.log）",
+            "YuSwitch",
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error);
+    }
+#endif
+    Environment.Exit(1);
 }
 

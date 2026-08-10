@@ -76,6 +76,11 @@ public static class AdminEndpoints
         // Restart the whole application (new process, re-reads listen_host/port).
         g.MapPost("/system/restart", RestartApplication);
 
+        // Self-update: check GitHub Releases for a newer single-file binary and
+        // apply it (download → verify → swap → restart).
+        g.MapGet("/system/update/check", CheckUpdate);
+        g.MapPost("/system/update/apply", ApplyUpdate);
+
         // Seed demo config
         g.MapPost("/seed", Seed);
 
@@ -901,6 +906,7 @@ public static class AdminEndpoints
             AppSettingsService.KeyListenPort,
             AppSettingsService.KeyAdminToken,
             AppSettingsService.KeyWebSearchTavilyKey,
+            AppSettingsService.KeyUpdateBaseUrl,
             AppSettingsService.KeyRequestTimeoutDefaultS,
             AppSettingsService.KeyHealthProbeEnabled,
             AppSettingsService.KeyHealthProbeIntervalS,
@@ -997,6 +1003,40 @@ public static class AdminEndpoints
         });
 
         return Results.Json(new { ok = true, message = "正在重启，请稍候…" }, AdminJsonOpts);
+    }
+
+    /// <summary>Query the update source for a newer version + the platform asset.</summary>
+    private static async Task<IResult> CheckUpdate(
+        [FromServices] UpdateService updater, CancellationToken ct)
+    {
+        return Results.Json(await updater.CheckAsync(ct), AdminJsonOpts);
+    }
+
+    /// <summary>Download, verify, swap and restart into the new binary. The
+    /// download runs synchronously in this request; on success the process
+    /// exits ~1s later (same fire-and-forget as restart), so the client's
+    /// connection may drop — that is expected.</summary>
+    private static async Task<IResult> ApplyUpdate(
+        [FromServices] UpdateService updater,
+        [FromServices] IHostApplicationLifetime life,
+        CancellationToken ct)
+    {
+        var (ok, error) = await updater.ApplyAsync(ct);
+        if (!ok)
+            return Results.Json(new { ok = false, error }, AdminJsonOpts);
+
+        // Mirrors RestartApplication: flush the response, then stop the host
+        // and force-exit so the old process dies and the swapped-in binary
+        // takes over the port/mutex.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(800);
+            try { life.StopApplication(); } catch { /* best effort */ }
+            await Task.Delay(300);
+            Environment.Exit(0);
+        });
+
+        return Results.Json(new { ok = true, message = "更新已下载并校验，正在重启到新版本…" }, AdminJsonOpts);
     }
 
     private static async Task<IResult> DiscoverModels(

@@ -47,6 +47,7 @@ YuSwitch（禹枢）是一个 .NET 8 的 AI 模型网关：统一接入、切换
 - **展示位置**：`/health`（`Program.cs` 读程序集版本）+ 侧边栏底部 `NavMenu.razor` 的 `YuSwitch v@(AppInfo.Version)`（由 `AppVersionService` 提供，取 Major.Minor.Build）。
 - **Tag 格式**：语义化版本 `vX.Y.Z`，如 `v0.0.1`。只有 `v*` tag 推送会触发完整发布；`workflow_dispatch` 只构建上传 artifact 不建 Release。
 - **切版本流程**：更新 csproj `<Version>` → 提交 → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → CI 自动构建 + 发布。多平台产物见 release.yml matrix（win/linux/osx × x64/arm64；Windows 带 GUI，其余 headless）。
+- **自更新与 schema 兼容**：发布版支持设置页「检查更新/立即更新」（下载 → `.sha256` 校验 → 替换 exe → 重启）。更新后新版本启动会自动跑 Program.cs 启动块的幂等迁移（`EnsureCreated` + `CREATE TABLE/INDEX IF NOT EXISTS` + `AddColumnIfMissingAsync`），DB 与旧版共用（CWD 锚定 exe 目录）。**因此 schema 变更必须只做「新增」**：加列/建表/建索引走幂等模式并在 Program.cs 登记；改名、删列、改类型等破坏性变更会导致旧库升级后启动崩溃（"no such column"），不受支持。
 - **注意**：`Program.cs` 单文件模式下 `Assembly.Location` 为空（IL3000 警告）是**预期行为**——重启逻辑已用 `isDotnetHost` 判断绕过，不要用 `Assembly.Location` 解析路径，用 `AppContext.BaseDirectory`。
 
 ## Git 规范
@@ -91,5 +92,5 @@ dotnet publish YuSwitch.csproj -c Release -f net8.0-windows -r win-x64 \
 1. **Razor 里写版本号**：`v@expr` 会被当作邮箱地址字面量，必须写 `v@(expr)`。
 2. **publish 不指定 `-f`**：双目标 csproj 直接 `dotnet publish` 会报错，必须 `-f net8.0` 或 `-f net8.0-windows`。
 3. **命令行为参数**：`--headless`、`--restart-of <pid>` 必须在 `CreateBuilder` 前从 args 剥离（见 Program.cs 开头注释）。
-4. **DB 迁移**：`EnsureCreated` 只建全新库的 schema；对已存在库，新增列用 `AddColumnIfMissingAsync` 幂等迁移（Program.cs 尾部）。
+4. **DB 迁移（自更新兼容）**：`EnsureCreated` 只建全新库的 schema；对已存在库，新增列用 `AddColumnIfMissingAsync` 幂等迁移（Program.cs 启动块）。**只支持增量变更**——加新列/表/索引必须走幂等模式并在 Program.cs 登记，否则自动更新后的旧库启动会因 "no such column" 崩溃；改名/删列/改类型等破坏性变更不受支持。
 5. **不要给 "openai" HttpClient 加超时/重试**：超时与 failover 由 GatewayService 统一决策，见上文。

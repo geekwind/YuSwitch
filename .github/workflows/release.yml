@@ -130,6 +130,14 @@ jobs:
           mv dist/YuSwitch-*.dmg ./
           ls -lh YuSwitch-*.dmg
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          for f in YuSwitch-*.zip YuSwitch-*.tar.gz YuSwitch-*.dmg; do
+            [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
+          done
+          ls -lh YuSwitch-*.sha256
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -138,6 +146,7 @@ jobs:
             YuSwitch-*.zip
             YuSwitch-*.tar.gz
             YuSwitch-*.dmg
+            YuSwitch-*.sha256
 
   release:
     needs: build
@@ -163,6 +172,7 @@ jobs:
             artifacts/*.zip
             artifacts/*.tar.gz
             artifacts/*.dmg
+            artifacts/*.sha256
           body: |
             ## YuSwitch ${{ github.ref_name }}
 
