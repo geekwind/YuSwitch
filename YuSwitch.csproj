@@ -33,6 +33,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.*" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.*" />
+    <!-- Cross-platform desktop shell (macOS WKWebView, Windows/Linux WebView2/
+         WebKitGTK). Included for both TFMs so Gui.PhotinoShell compiles
+         everywhere; Windows still runs the WinForms shell for now. -->
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
@@ -40,7 +44,9 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <Compile Remove="Gui\**\*.cs" />
+    <!-- WinForms shell is Windows-only; the Photino shell (Gui/Photino) and
+         shared shell plumbing stay in the net8.0 build so macOS gets a GUI. -->
+    <Compile Remove="Gui\WinForms\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

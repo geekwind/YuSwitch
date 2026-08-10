@@ -118,6 +118,14 @@ jobs:
           cd ..
           ls -lh YuSwitch-*
 
+      - name: Package macOS .app + DMG
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.VERSION }}"
+          bash tools/make_macos_app.sh ./publish ./logo.png "$VER" "${{ matrix.rid }}" ./dist
+          ls -lh dist/YuSwitch-*.dmg
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -125,6 +133,7 @@ jobs:
           path: |
             YuSwitch-*.zip
             YuSwitch-*.tar.gz
+            dist/YuSwitch-*.dmg
 
   release:
     needs: build
@@ -149,6 +158,7 @@ jobs:
           files: |
             artifacts/*.zip
             artifacts/*.tar.gz
+            artifacts/*.dmg
           body: |
             ## YuSwitch ${{ github.ref_name }}
 
@@ -162,15 +172,19 @@ jobs:
             | Windows ARM64 | `YuSwitch-win-arm64-*.zip` | 含桌面 GUI（WebView2） |
             | Linux x64 | `YuSwitch-linux-x64-*.tar.gz` | headless |
             | Linux ARM64 | `YuSwitch-linux-arm64-*.tar.gz` | headless |
-            | macOS Intel | `YuSwitch-osx-x64-*.tar.gz` | headless |
-            | macOS Apple Silicon | `YuSwitch-osx-arm64-*.tar.gz` | headless |
+            | macOS Intel | `YuSwitch-osx-x64-*.dmg` | 含桌面窗口（Photino/WKWebView） |
+            | | `YuSwitch-osx-x64-*.tar.gz` | headless |
+            | macOS Apple Silicon | `YuSwitch-osx-arm64-*.dmg` | 含桌面窗口（Photino/WKWebView） |
+            | | `YuSwitch-osx-arm64-*.tar.gz` | headless |
 
             ### 使用
 
-            1. 下载对应平台的压缩包并解压
-            2. 运行 `YuSwitch.exe`（Windows，含桌面窗口）或 `./YuSwitch`（Linux/macOS）
-            3. 浏览器访问 `http://localhost:5078`（Windows 桌面模式会自动打开窗口）
-            4. 首页点击「初始化示例配置」一键配置上游
+            **macOS（桌面窗口）**：下载 `.dmg` 打开，把「禹枢」拖入 Applications 后启动，出现管理窗口；设置数据保存在 `~/Library/Application Support/YuSwitch`。若提示未受信任的开发者，请右键 →「打开」。
+
+            **其他平台**：下载对应平台的压缩包并解压
+            1. 运行 `YuSwitch.exe`（Windows，含桌面窗口）或 `./YuSwitch`（Linux/macOS headless）
+            2. 浏览器访问 `http://localhost:5078`（Windows/macOS 桌面模式会自动打开窗口）
+            3. 首页点击「初始化示例配置」一键配置上游
 
             ### 特性
 

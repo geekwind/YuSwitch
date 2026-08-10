@@ -7,6 +7,7 @@
 - Outputs:
     <root>/icon.ico            multi-resolution (16..256) Windows icon
     <root>/wwwroot/favicon.png static browser-tab favicon (64x64)
+    <root>/wwwroot/logo-512.png 512x512 master for the macOS .app / Photino icon
 
 Run again after replacing logo.png to regenerate everything. Code that
 consumes icon.ico (csproj <ApplicationIcon>, MainForm embedded resource)
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LOGO = ROOT / "logo.png"
 ICO = ROOT / "icon.ico"
 FAVICON = ROOT / "wwwroot" / "favicon.png"
+LOGO512 = ROOT / "wwwroot" / "logo-512.png"
 
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 FAVICON_SIZE = 64
@@ -109,6 +111,10 @@ def main() -> None:
     favicon = fit_square(source, FAVICON_SIZE)
     favicon.save(FAVICON)
     print(f"Wrote {FAVICON} ({FAVICON_SIZE}x{FAVICON_SIZE})")
+
+    logo512 = fit_square(source, 512)
+    logo512.save(LOGO512)
+    print(f"Wrote {LOGO512} (512x512)")
 
 
 if __name__ == "__main__":

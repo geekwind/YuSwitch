@@ -16,13 +16,19 @@ using YuSwitch.Services;
 
 // Single-file publish extracts to a temp folder and runs from there, so
 // relative paths (logs/, simpleone.db) would be wiped on exit. Pin the
-// working directory to the real exe location so state persists next to it.
+// working directory to a stable, user-writable location so state persists:
+//  - macOS .app bundle → ~/Library/Application Support/YuSwitch (the bundle
+//    itself must stay read-only and movable);
+//  - everything else → the real exe location.
 try
 {
-    var exeDir = Path.GetDirectoryName(Environment.ProcessPath);
-    if (!string.IsNullOrEmpty(exeDir) &&
-        !string.Equals(Directory.GetCurrentDirectory(), exeDir, StringComparison.OrdinalIgnoreCase))
-        Directory.SetCurrentDirectory(exeDir);
+    var appDataDir = GetAppDataDir();
+    if (appDataDir is not null &&
+        !string.Equals(Directory.GetCurrentDirectory(), appDataDir, StringComparison.OrdinalIgnoreCase))
+    {
+        Directory.CreateDirectory(appDataDir);
+        Directory.SetCurrentDirectory(appDataDir);
+    }
 }
 catch { /* best effort */ }
 
@@ -276,7 +282,8 @@ app.MapAdminEndpoints();
 // it to app.Urls — we only set app.Urls explicitly when nothing usable was given.
 var port = listenPort;
 var nonLoopback = false;
-var desktopMode = OperatingSystem.IsWindows() && Environment.UserInteractive && !forceHeadless;
+var desktopMode = (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+    && Environment.UserInteractive && !forceHeadless;
 var urls = builder.Configuration["Urls"];
 if (!string.IsNullOrEmpty(urls))
 {
@@ -319,121 +326,22 @@ if (nonLoopback)
         Log.Warning("Listening on a non-local address with no admin token — remote /admin requests will be rejected until a token is set in Settings");
 }
 
-#if WINDOWS
 // --- Desktop GUI mode ---
-// Windows with an interactive desktop session, unless --headless/--no-gui.
-// (Console.IsOutputRedirected is useless here: WinExe has no console at all.)
-if (OperatingSystem.IsWindows() && Environment.UserInteractive && !forceHeadless)
+// Windows runs the WinForms/WebView2 shell; macOS runs the Photino (WKWebView)
+// shell. Both are thin wrappers over the same local gateway — the shell starts
+// the server and stops it on exit. Headless mode (servers, Docker, Linux,
+// --headless) falls through to app.Run() below.
+if (desktopMode)
 {
-    var localUrl = $"http://localhost:{port}";
-
-    // Single-instance guard, keyed by port. The OS releases the mutex if the
-    // holding process dies, so "held" reliably means "instance alive".
-    using var instanceMutex = new Mutex(initiallyOwned: true, $@"Global\YuSwitch-{port}", out var isFirstInstance);
-    if (!isFirstInstance)
+    using var shell = YuSwitch.Gui.ShellFactory.Create();
+    if (shell is not null)
     {
-        var running = await ProbePortAsync(localUrl) == PortProbe.Ours;
-        System.Windows.Forms.MessageBox.Show(
-            running
-                ? $"禹枢 已在运行（{localUrl}），将在浏览器中打开现有实例。"
-                : "禹枢 的另一个实例正在启动中，请稍候。",
-            "禹枢",
-            System.Windows.Forms.MessageBoxButtons.OK,
-            System.Windows.Forms.MessageBoxIcon.Information);
-        if (running)
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(localUrl) { UseShellExecute = true });
+        await shell.RunAsync(app, port, CancellationToken.None);
         return;
     }
-
-    // Mutex says we're the first YuSwitch on this port — but a FOREIGN
-    // program could still hold the port (it wouldn't own our named mutex). If
-    // something answers HTTP there that isn't us, prompt and bail WITHOUT
-    // opening a browser, otherwise the WebView would silently load the foreign
-    // app's page. (Non-HTTP occupants fall through to the StartAsync catch.)
-    var preProbe = await ProbePortAsync(localUrl);
-    if (preProbe == PortProbe.Foreign)
-    {
-        Log.Warning("Port {Port} is already in use by another program; aborting desktop startup", port);
-        System.Windows.Forms.MessageBox.Show(
-            $"端口 {port} 已被其他程序占用。\n\n" +
-            "请在「设置 → 监听 / 网络」中修改监听端口，或关闭占用该端口的程序后重试。",
-            "禹枢 启动失败",
-            System.Windows.Forms.MessageBoxButtons.OK,
-            System.Windows.Forms.MessageBoxIcon.Warning);
-        Environment.Exit(1);
-    }
-    if (preProbe == PortProbe.Ours)
-    {
-        // Rare race: mutex free yet /health says ours. Treat like already-running.
-        System.Windows.Forms.MessageBox.Show(
-            $"禹枢 已在运行（{localUrl}），将在浏览器中打开现有实例。",
-            "禹枢",
-            System.Windows.Forms.MessageBoxButtons.OK,
-            System.Windows.Forms.MessageBoxIcon.Information);
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(localUrl) { UseShellExecute = true });
-        return;
-    }
-
-    // Start (and confirm) the server BEFORE showing any window, so a bind
-    // failure is a visible error instead of a forever-"starting" shell.
-    try
-    {
-        await app.StartAsync();
-        Log.Information("Gateway started at {Url} (desktop mode)", localUrl);
-    }
-    catch (Exception ex)
-    {
-        var baseEx = ex.GetBaseException();
-        // Kestrel surfaces port conflicts as SocketException(AddressAlreadyInUse)
-        // on some platforms and as IOException / a message on others; accept all
-        // of them so the prompt is accurate. None of these paths open a browser.
-        var msg = baseEx.Message ?? string.Empty;
-        var portInUse = baseEx is System.Net.Sockets.SocketException
-        {
-            SocketErrorCode: System.Net.Sockets.SocketError.AddressAlreadyInUse
-        }
-        || baseEx is System.IO.IOException
-        || msg.Contains("address already in use", StringComparison.OrdinalIgnoreCase)
-        || msg.Contains("already in use", StringComparison.OrdinalIgnoreCase)
-        || msg.Contains("failed to bind", StringComparison.OrdinalIgnoreCase);
-        var logDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
-        Log.Fatal(ex, "Gateway failed to start");
-        System.Windows.Forms.MessageBox.Show(
-            (portInUse
-                ? $"端口 {port} 已被其他程序占用。请关闭占用该端口的程序，或在「设置 → 监听 / 网络」中修改监听端口。"
-                : $"启动失败：{baseEx.Message}")
-            + $"\n\n详细日志：{logDir}",
-            "禹枢 启动失败",
-            System.Windows.Forms.MessageBoxButtons.OK,
-            System.Windows.Forms.MessageBoxIcon.Error);
-        Environment.Exit(1);
-    }
-
-    // WinForms + WebView2 require an STA thread. This top-level main has been
-    // running on MTA thread-pool threads since the first await, so the message
-    // loop gets its own explicitly-STA thread.
-    var uiThread = new Thread(() =>
-    {
-        System.Windows.Forms.Application.EnableVisualStyles();
-        System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
-        using var form = new YuSwitch.Gui.MainForm(port);
-        System.Windows.Forms.Application.Run(form);
-    })
-    {
-        Name = "YuSwitch UI",
-        IsBackground = false,
-    };
-    uiThread.SetApartmentState(ApartmentState.STA);
-    uiThread.Start();
-    uiThread.Join();
-
-    // Window closed via tray "退出" → stop the server cleanly.
-    await app.StopAsync();
-    return;
 }
-#endif
 
-// Headless mode (server/Docker, or --headless on Windows).
+// Headless mode (server/Docker, or --headless on Windows/macOS).
 app.Run();
 
 // Adds a column to an existing table if it isn't there yet. SQLite has no
@@ -463,6 +371,23 @@ static bool IsLoopbackHost(string? host) =>
     || host.Equals("[::1]")
     || host.Equals("::1");
 
+// Stable directory for runtime state (simpleone.db, logs/). Inside a macOS
+// .app bundle the executable lives in a read-only, movable bundle, so state
+// goes to ~/Library/Application Support/YuSwitch instead of next to the binary.
+static string? GetAppDataDir()
+{
+    var exePath = Environment.ProcessPath;
+    if (string.IsNullOrEmpty(exePath)) return null;
+    if (OperatingSystem.IsMacOS() &&
+        exePath.Contains("/Contents/MacOS/", StringComparison.OrdinalIgnoreCase))
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(profile, "Library", "Application Support", "YuSwitch");
+    }
+    var exeDir = Path.GetDirectoryName(exePath);
+    return string.IsNullOrEmpty(exeDir) ? null : exeDir;
+}
+
 // Blocks until the given PID is gone or the timeout elapses. Used by the
 // restart child to wait for the old process to release its port/mutex before
 // booting, so the new instance doesn't trip the single-instance guard.
@@ -478,30 +403,3 @@ static void WaitForProcessExit(int pid, TimeSpan timeout)
     }
 }
 
-#if WINDOWS
-// Probes /health on the target URL. Distinguishes our own running instance
-// (Ours) from some OTHER program answering HTTP there (Foreign) from nothing
-// answering (Free — port open, or a non-HTTP occupant caught later by the
-// StartAsync bind). Used so a foreign port owner yields a clear prompt instead
-// of the WebView silently loading the wrong page.
-static async Task<PortProbe> ProbePortAsync(string baseUrl)
-{
-    try
-    {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-        var resp = await http.GetAsync(baseUrl + "/health");
-        var body = await resp.Content.ReadAsStringAsync();
-        return body.Contains("\"app\":\"YuSwitch\"", StringComparison.OrdinalIgnoreCase)
-            ? PortProbe.Ours : PortProbe.Foreign;
-    }
-    catch
-    {
-        return PortProbe.Free;
-    }
-}
-
-// Type declarations must follow all top-level statements / local functions
-// (CS8803), so the enum lives at the tail of the file. Local functions above
-// can still reference it — types aren't order-sensitive like local functions.
-enum PortProbe { Free, Ours, Foreign }
-#endif
