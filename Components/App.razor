@@ -1,0 +1,26 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    @* Apply the stored theme before first paint so dark mode doesn't flash white.
+       (eg.js loads at the end of body — too late for this.) *@
+    <script>try { if (localStorage.getItem('eg-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) { }</script>
+    @* YuSwitch.styles.css is auto-generated scoped CSS; load conditionally
+       so single-file exe (embedded assets, no scoped CSS manifest) doesn't 404. *@
+    <link rel="stylesheet" href="YuSwitch.styles.css" onerror="this.remove()" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/eg.js?v=2"></script>
+</body>
+
+</html>

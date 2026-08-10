@@ -1,0 +1,128 @@
+﻿@inject AppSettingsService Settings
+@inject AppVersionService AppInfo
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">
+            @if (Settings.LogoType == "image" && !string.IsNullOrEmpty(Settings.LogoValue))
+            {
+                <img class="brand-badge brand-logo-img" src="@Settings.LogoValue" alt="logo" />
+            }
+            else if (Settings.LogoType == "emoji" && !string.IsNullOrEmpty(Settings.LogoValue))
+            {
+                <span class="brand-badge brand-logo-emoji">@Settings.LogoValue</span>
+            }
+            else
+            {
+                <span class="brand-badge">@BrandInitials</span>
+            }
+            <span class="brand-text">
+                @Settings.AppName
+                <span class="brand-sub">@Settings.Subtitle</span>
+            </span>
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+        <div class="nav-section">总览</div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="menu-icon"><Icon Name="home" /></span> 仪表盘
+            </NavLink>
+        </div>
+
+        <div class="nav-section">配置</div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="services">
+                <span class="menu-icon"><Icon Name="server" /></span> 服务管理
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="apikeys">
+                <span class="menu-icon"><Icon Name="key" /></span> API Key
+            </NavLink>
+        </div>
+
+        <div class="nav-section">观测</div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="playground">
+                <span class="menu-icon"><Icon Name="play" /></span> 接口测试
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="usage">
+                <span class="menu-icon"><Icon Name="chart" /></span> 用量统计
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="logs">
+                <span class="menu-icon"><Icon Name="list" /></span> 调用日志
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="dispatch-trace">
+                <span class="menu-icon"><Icon Name="zap" /></span> 路由追踪
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="realtime">
+                <span class="menu-icon"><Icon Name="activity" /></span> 实时订阅
+            </NavLink>
+        </div>
+
+        <div class="nav-section">系统</div>
+
+        <div class="nav-item px-2">
+            <NavLink class="nav-link" href="settings">
+                <span class="menu-icon"><Icon Name="settings" /></span> 设置
+            </NavLink>
+        </div>
+    </nav>
+</div>
+
+<div class="nav-version">YuSwitch v@(AppInfo.Version)</div>
+
+@code {
+    protected override void OnInitialized() => Settings.Changed += OnSettingsChanged;
+
+    private void OnSettingsChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Settings.Changed -= OnSettingsChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Push the configured name into the browser title and the logo into
+        // the favicon on first paint and after every settings save.
+        await JS.InvokeVoidAsync("egSetTitle", Settings.AppName, Settings.Subtitle);
+        await JS.InvokeVoidAsync("egSetFavicon", Settings.LogoType, Settings.LogoValue, Settings.AppName);
+    }
+
+    // Derive a 1-2 char brand monogram from the configured app name.
+    private string BrandInitials
+    {
+        get
+        {
+            var n = Settings.AppName?.Trim() ?? "";
+            if (n.Length == 0) return "EG";
+            // ASCII names → first letters of up to two words; CJK → first char.
+            var words = n.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length >= 2 && char.IsAscii(words[0][0]) && char.IsAscii(words[1][0]))
+                return ("" + char.ToUpperInvariant(words[0][0]) + char.ToUpperInvariant(words[1][0]));
+            return n[..Math.Min(2, n.Length)].ToUpperInvariant();
+        }
+    }
+}

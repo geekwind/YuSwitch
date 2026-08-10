@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+.git/
+.gitignore
+.vs/
+**/*.user
+**/*.suo
+**/*.userosscache
+**/*.sln.docstates
+logs/
+*.db
+*.db-shm
+*.db-wal
+**/publish/
+.vscode/
+*.pdb
+*.user

@@ -1,0 +1,154 @@
+.navbar-toggler {
+    appearance: none;
+    cursor: pointer;
+    width: 3.5rem;
+    height: 2.5rem;
+    color: white;
+    position: absolute;
+    top: 0.5rem;
+    right: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.55%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") no-repeat center/1.75rem rgba(255, 255, 255, 0.1);
+}
+
+    .navbar-toggler:checked { background-color: rgba(255, 255, 255, 0.5); }
+
+.top-row {
+    height: 3.4rem;
+    background: transparent;
+}
+
+.navbar-brand {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #fff;
+}
+
+.brand-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.85rem;
+    height: 1.85rem;
+    border-radius: 8px;
+    /* 全站唯一保留的品牌渐变（logo 一处） */
+    background: linear-gradient(135deg, #4f46e5, #6366f1);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.brand-text {
+    letter-spacing: 0.01em;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.brand-sub {
+    font-size: 0.66rem;
+    font-weight: 500;
+    color: var(--eg-side-text-dim);
+    letter-spacing: 0.04em;
+}
+
+.brand-logo-img {
+    object-fit: cover;
+    background: #fff;
+    padding: 2px;
+    border-radius: 9px;
+    width: 1.85rem;
+    height: 1.85rem;
+}
+
+.brand-logo-emoji {
+    font-size: 1.05rem;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: none;
+}
+
+.nav-section {
+    font-size: 0.68rem;
+    color: var(--eg-side-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 650;
+    padding: 1rem 1.1rem 0.4rem;
+    user-select: none;
+}
+
+.nav-item {
+    font-size: 0.92rem;
+    padding-bottom: 0.15rem;
+}
+
+    .nav-item:last-of-type { padding-bottom: 1rem; }
+
+    .nav-item ::deep .nav-link {
+        color: var(--eg-side-text);
+        background: none;
+        border: none;
+        border-radius: 9px;
+        height: 2.55rem;
+        display: flex;
+        align-items: center;
+        padding: 0 0.85rem;
+        width: 100%;
+        transition: background-color 0.13s ease, color 0.13s ease;
+        position: relative;
+    }
+
+.menu-icon {
+    display: inline-flex;
+    justify-content: center;
+    width: 1.6rem;
+    margin-right: 0.5rem;
+    font-size: 1.02rem;
+    opacity: 0.9;
+}
+
+.nav-item ::deep a.active {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--eg-primary);
+}
+
+.nav-item ::deep .nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #fff;
+}
+
+.nav-scrollable { display: none; }
+
+.nav-version { display: none; }
+
+.navbar-toggler:checked ~ .nav-scrollable { display: block; }
+
+@media (min-width: 641px) {
+    .navbar-toggler { display: none; }
+
+    .nav-scrollable {
+        /* Never collapse the sidebar for wide screens */
+        display: block;
+        /* Fill the sidebar between the brand bar and the version footer,
+           scrolling for tall menus. */
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .nav-version {
+        display: block;
+        padding: 0.6rem 1.1rem;
+        font-size: 0.72rem;
+        color: var(--eg-side-text-dim);
+        letter-spacing: 0.03em;
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+        user-select: none;
+    }
+}

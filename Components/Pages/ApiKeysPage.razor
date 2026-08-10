@@ -1,0 +1,348 @@
+@page "/apikeys"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject ToastService Toasts
+
+<PageTitle>API Key 管理</PageTitle>
+
+<ConfirmDialog @ref="confirm" />
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">API Key 管理</h1>
+        <p class="eg-sub">客户端凭此 Key 接入网关</p>
+    </div>
+    <button class="btn btn-primary" @onclick="OpenCreate">+ 新建 Key</button>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>调用地址</span>
+        <small class="text-muted">客户端使用下面的地址 + API Key 接入网关</small>
+    </div>
+    <div class="card-body py-2">
+        <table class="table table-sm align-middle mb-2">
+            <tbody>
+                <tr>
+                    <td style="width:160px">OpenAI 兼容</td>
+                    <td><code>@(BaseUrl)v1/chat/completions</code></td>
+                    <td class="text-muted small">Header: <code>Authorization: Bearer &lt;Key&gt;</code></td>
+                    <td style="width:70px"><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/chat/completions"))">复制</button></td>
+                </tr>
+                <tr>
+                    <td>Anthropic 兼容</td>
+                    <td><code>@(BaseUrl)v1/messages</code></td>
+                    <td class="text-muted small">Header: <code>x-api-key: &lt;Key&gt;</code></td>
+                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/messages"))">复制</button></td>
+                </tr>
+                <tr>
+                    <td>模型列表</td>
+                    <td><code>@(BaseUrl)v1/models</code></td>
+                    <td class="text-muted small">GET，同 OpenAI 鉴权</td>
+                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/models"))">复制</button></td>
+                </tr>
+                <tr>
+                    <td>SDK Base URL</td>
+                    <td><code>@(BaseUrl)v1</code></td>
+                    <td class="text-muted small">OpenAI/Anthropic SDK 的 <code>base_url</code></td>
+                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1"))">复制</button></td>
+                </tr>
+            </tbody>
+        </table>
+        <details>
+            <summary class="text-muted small" style="cursor:pointer">curl 示例</summary>
+            <pre class="bg-light border rounded p-2 mt-2 mb-0 small">curl @(BaseUrl)v1/chat/completions \
+  -H "Authorization: Bearer &lt;你的Key&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"&lt;模型名&gt;","messages":[{"role":"user","content":"你好"}]}'</pre>
+        </details>
+    </div>
+</div>
+
+@if (keys is null)
+{
+    <p><span class="spinner-border spinner-border-sm"></span> 加载中...</p>
+}
+else if (keys.Count == 0)
+{
+    <div class="alert alert-info">还没有配置 API Key。注意：没有任何 Key 时网关为开放模式（不鉴权）。</div>
+}
+else
+{
+    <div class="eg-table-card">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr><th>ID</th><th>名称</th><th>Key</th><th>允许模型</th><th>限制</th><th>状态</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var k in keys)
+            {
+                <tr>
+                    <td>@k.Id</td>
+                    <td>@k.Name</td>
+                    <td><code class="text-truncate d-inline-block" style="max-width:200px">@Mask(k.KeyValue)</code></td>
+                    <td><small class="text-muted">@Truncate(k.AllowedModels, 40)</small></td>
+                    <td><small class="text-muted">@LimitSummary(k)</small></td>
+                    <td>
+                        <div class="form-check form-switch mb-0" title="@(k.Enabled ? "点击停用" : "点击启用")">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   checked="@k.Enabled" @onchange="() => ToggleKey(k)" />
+                        </div>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => Copy(k.KeyValue)">复制</button>
+                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenEdit(k)">编辑</button>
+                        <button class="btn btn-sm btn-outline-success me-1" title="一键配置本地 Claude Code 使用此 Key" @onclick="() => Wire(k, WireTarget.Claude)">配 Claude</button>
+                        <button class="btn btn-sm btn-outline-success me-1" title="一键配置本地 Codex 使用此 Key" @onclick="() => Wire(k, WireTarget.Codex)">配 Codex</button>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteKey(k.Id)">删除</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+
+@if (showEditor)
+{
+    <div class="modal d-block eg-modal-backdrop" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "新建 API Key" : $"编辑 API Key #{editing.Id}")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditor"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">名称</label>
+                        <input class="form-control" @bind="editing.Name" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@(editing.Id == 0 ? "Key (留空自动生成)" : "Key")</label>
+                        <input class="form-control font-monospace @(fieldErrors.ContainsKey("keyValue") ? "is-invalid" : "")" @bind="editing.KeyValue" placeholder="sk-..." />
+                        @if (fieldErrors.TryGetValue("keyValue", out var keyErr))
+                        { <div class="invalid-feedback d-block">@keyErr</div> }
+                        @if (editing.Id != 0)
+                        { <small class="text-muted">修改 Key 值会让使用旧值的客户端立即失效</small> }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">允许模型 (逗号分隔, * 表示全部)</label>
+                        <input class="form-control" @bind="editing.AllowedModels" />
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">QPM 限制 (0 = 不限)</label>
+                            <input class="form-control" type="number" min="0" @bind="editing.QpmLimit" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">每日请求配额 (0 = 不限)</label>
+                            <input class="form-control" type="number" min="0" @bind="editing.DailyQuota" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">IP 白名单 (逗号分隔，支持 CIDR；留空 = 不限)</label>
+                        <input class="form-control font-monospace" placeholder="192.168.1.0/24, 10.0.0.5" @bind="editing.IpAllowlist" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">过期时间 (留空 = 永久)</label>
+                        <input class="form-control" style="max-width:260px" type="datetime-local" @bind="editing.ExpiresAt" />
+                    </div>
+                    <div class="form-check">
+                        <InputCheckbox id="en" @bind-Value="editing.Enabled" />
+                        <label class="form-check-label" for="en">启用</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseEditor">取消</button>
+                    <button class="btn btn-primary" @onclick="SaveKey" disabled="@saving">
+                        @if (saving) { <span class="spinner-border spinner-border-sm"></span> <text> 保存中…</text> } else { <text>保存</text> }
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showWireResult)
+{
+    <div class="modal d-block eg-modal-backdrop" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(wireOk ? "配置完成" : "配置未完成")</h5>
+                    <button type="button" class="btn-close" @onclick="() => showWireResult = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">@wireMessage</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => showWireResult = false">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string BaseUrl => Nav.BaseUri;
+    private List<ApiKeyEntity>? keys;
+    private bool showEditor;
+    private bool saving;
+    private ApiKeyEntity editing = new();
+    private Dictionary<string, string> fieldErrors = new();
+    private ConfirmDialog? confirm;
+
+    // One-click CLI wiring result modal state.
+    private bool showWireResult;
+    private bool wireOk;
+    private string wireMessage = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try { keys = await Http.GetFromJsonAsync<List<ApiKeyEntity>>("/admin/apikeys"); }
+        catch { keys = new(); }
+    }
+
+    private void OpenCreate()
+    {
+        editing = new ApiKeyEntity { Enabled = true, AllowedModels = "*" };
+        fieldErrors.Clear();
+        showEditor = true;
+    }
+
+    private void OpenEdit(ApiKeyEntity k)
+    {
+        // Edit a copy so 取消 leaves the row untouched.
+        editing = new ApiKeyEntity
+        {
+            Id = k.Id, Name = k.Name, KeyValue = k.KeyValue,
+            AllowedModels = k.AllowedModels, Enabled = k.Enabled,
+            QpmLimit = k.QpmLimit, DailyQuota = k.DailyQuota,
+            IpAllowlist = k.IpAllowlist, ExpiresAt = k.ExpiresAt,
+        };
+        fieldErrors.Clear();
+        showEditor = true;
+    }
+
+    private void CloseEditor() => showEditor = false;
+
+    private async Task SaveKey()
+    {
+        saving = true;
+        fieldErrors.Clear();
+        try
+        {
+            var resp = editing.Id == 0
+                ? await Http.PostAsJsonAsync("/admin/apikeys", editing)
+                : await Http.PutAsJsonAsync($"/admin/apikeys/{editing.Id}", editing);
+            if (resp.IsSuccessStatusCode)
+            {
+                showEditor = false;
+                Toasts.Ok(editing.Id == 0 ? "API Key 已创建" : "API Key 已保存");
+                await LoadAsync();
+            }
+            else if (!await ShowFieldErrors(resp))
+            {
+                Toasts.Error(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        finally { saving = false; }
+    }
+
+    // Parses the structured {errors:{field:message}} 400 body; true if handled.
+    private async Task<bool> ShowFieldErrors(HttpResponseMessage resp)
+    {
+        if ((int)resp.StatusCode != 400) return false;
+        try
+        {
+            var body = await resp.Content.ReadFromJsonAsync<ValidationBody>();
+            if (body?.errors is { Count: > 0 })
+            {
+                fieldErrors = body.errors;
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private async Task ToggleKey(ApiKeyEntity k)
+    {
+        var updated = new ApiKeyEntity
+        {
+            Id = k.Id, Name = k.Name, KeyValue = k.KeyValue,
+            AllowedModels = k.AllowedModels, Enabled = !k.Enabled,
+            QpmLimit = k.QpmLimit, DailyQuota = k.DailyQuota,
+            IpAllowlist = k.IpAllowlist, ExpiresAt = k.ExpiresAt,
+        };
+        var resp = await Http.PutAsJsonAsync($"/admin/apikeys/{k.Id}", updated);
+        if (resp.IsSuccessStatusCode)
+        {
+            k.Enabled = !k.Enabled;
+            Toasts.Ok(k.Enabled ? $"「{k.Name}」已启用" : $"「{k.Name}」已停用");
+        }
+        else
+        {
+            Toasts.Error(await resp.Content.ReadAsStringAsync());
+            await LoadAsync();  // revert the visual toggle
+        }
+    }
+
+    private async Task DeleteKey(int id)
+    {
+        if (confirm is null || !await confirm.ShowAsync("确认删除此 Key？使用它的客户端将立即失效。", "删除 API Key", "删除")) return;
+        await Http.DeleteAsync($"/admin/apikeys/{id}");
+        Toasts.Ok("已删除");
+        await LoadAsync();
+    }
+
+    private async Task Copy(string s)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", s);
+        Toasts.Info("已复制到剪贴板");
+    }
+
+    // One-click: detect local Claude Code / Codex, back up its existing config,
+    // and write this gateway's address + this key into it. The backend does the
+    // file work (desktop app runs on the same machine as the CLI).
+    private async Task Wire(ApiKeyEntity k, WireTarget target)
+    {
+        var targetStr = target switch { WireTarget.Claude => "claude", WireTarget.Codex => "codex", _ => "claude" };
+        try
+        {
+            var resp = await Http.PostAsync($"/admin/apikeys/{k.Id}/wire?target={targetStr}", null);
+            WireResult? r = null;
+            try { r = await resp.Content.ReadFromJsonAsync<WireResult>(); } catch { }
+            wireOk = r?.Ok ?? resp.IsSuccessStatusCode;
+            wireMessage = r?.Message ?? (resp.IsSuccessStatusCode ? "已发送配置请求" : $"请求失败 (HTTP {(int)resp.StatusCode})");
+        }
+        catch (Exception ex)
+        {
+            wireOk = false;
+            wireMessage = $"请求失败：{ex.Message}";
+        }
+        showWireResult = true;
+    }
+
+    private static string Mask(string k) => k.Length <= 10 ? k : k[..7] + "..." + k[^4..];
+    private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "...";
+
+    private static string LimitSummary(ApiKeyEntity k)
+    {
+        var parts = new List<string>();
+        if (k.QpmLimit > 0) parts.Add($"{k.QpmLimit}/min");
+        if (k.DailyQuota > 0) parts.Add($"{k.DailyQuota}/天");
+        if (!string.IsNullOrWhiteSpace(k.IpAllowlist)) parts.Add("IP限制");
+        if (k.ExpiresAt is { } exp) parts.Add(exp <= DateTime.Now ? "已过期" : $"至 {exp:MM-dd}");
+        return parts.Count == 0 ? "-" : string.Join(" · ", parts);
+    }
+
+    private class ValidationBody { public Dictionary<string, string>? errors { get; set; } }
+
+    private class WireResult { public bool Ok { get; set; } public string? Message { get; set; } }
+
+    private enum WireTarget { Claude, Codex }
+}

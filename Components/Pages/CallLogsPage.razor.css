@@ -1,0 +1,71 @@
+.eg-logtable {
+    table-layout: fixed;
+}
+
+    .eg-logtable td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.eg-logrow {
+    cursor: pointer;
+}
+
+    .eg-logrow.open > td {
+        background: var(--eg-primary-soft);
+        border-bottom: none;
+    }
+
+.eg-chain-up {
+    background: var(--eg-info-soft);
+    color: var(--eg-info) !important;
+}
+
+.eg-logdetail > td {
+    background: #fafbfd;
+    border-top: none;
+    padding: 0.9rem 1.1rem 1.1rem;
+    white-space: normal;
+}
+
+.eg-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.9rem;
+    margin-bottom: 0.7rem;
+}
+
+@media (max-width: 900px) {
+    .eg-detail-grid { grid-template-columns: 1fr; }
+}
+
+.eg-detail-label {
+    font-size: 0.74rem;
+    font-weight: 650;
+    color: var(--eg-text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.3rem;
+}
+
+.eg-detail-box {
+    background: var(--eg-surface);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-sm);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.82rem;
+    color: var(--eg-text-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.eg-detail-meta {
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    color: var(--eg-text-2);
+}

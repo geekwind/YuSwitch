@@ -1,0 +1,114 @@
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+main {
+    flex: 1;
+    background: var(--eg-bg);
+    min-width: 0;
+}
+
+.sidebar {
+    background: linear-gradient(180deg, var(--eg-side-1) 0%, var(--eg-side-2) 100%);
+}
+
+.top-row {
+    background: var(--eg-surface);
+    border-bottom: 1px solid var(--eg-border);
+    justify-content: flex-end;
+    height: 3.4rem;
+    display: flex;
+    align-items: center;
+}
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        white-space: nowrap;
+        margin-left: 1.5rem;
+        text-decoration: none;
+    }
+
+        .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
+            text-decoration: underline;
+        }
+
+    .top-row ::deep a:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+.top-row .eg-topbar-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--eg-text-2);
+}
+
+.top-row .eg-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-right: 0.9rem;
+    border: 1px solid var(--eg-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--eg-text-2);
+    cursor: pointer;
+}
+
+    .top-row .eg-theme-toggle:hover {
+        color: var(--eg-text);
+        border-color: var(--eg-border-strong);
+    }
+
+    .top-row .eg-topbar-badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--eg-success);
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+    }
+
+@media (max-width: 640.98px) {
+    .top-row { justify-content: space-between; }
+
+        .top-row ::deep a, .top-row ::deep .btn-link { margin-left: 0; }
+}
+
+@media (min-width: 641px) {
+    .page { flex-direction: row; }
+
+    .sidebar {
+        width: 250px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+        flex: none;
+        /* Column layout so the nav scroll area fills the space between the
+           brand bar and the pinned version footer. */
+        display: flex;
+        flex-direction: column;
+    }
+
+    .top-row {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+        .top-row.auth ::deep a:first-child {
+            flex: 1;
+            text-align: right;
+            width: 0;
+        }
+
+        .top-row, article {
+            padding-left: 2.25rem !important;
+            padding-right: 2.25rem !important;
+        }
+}

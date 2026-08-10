@@ -1,0 +1,147 @@
+@page "/realtime"
+@inject RealtimeNotificationService Notifications
+@inject HttpClient Http
+@using System.Text.Json
+
+<PageTitle>实时订阅管理</PageTitle>
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">实时订阅管理</h1>
+        <p class="eg-sub">查看当前所有活跃的实时通知订阅</p>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" @onclick="LoadAsync">刷新</button>
+</div>
+
+<!-- 内部调试数据：紧凑 key-value 状态条，不做仪表盘化 -->
+<div class="eg-statbar">
+    <div class="eg-statcell">
+        <div class="eg-statcell-label">new-log 订阅者</div>
+        <div class="eg-statcell-value">@newLogCount</div>
+        <div class="eg-statcell-sub">正在监听新日志通知</div>
+    </div>
+    <div class="eg-statcell">
+        <div class="eg-statcell-label">service-state 订阅者</div>
+        <div class="eg-statcell-value">@serviceStateCount</div>
+        <div class="eg-statcell-sub">正在监听服务状态变化</div>
+    </div>
+    <div class="eg-statcell">
+        <div class="eg-statcell-label">总连接数</div>
+        <div class="eg-statcell-value">@totalConnections</div>
+        <div class="eg-statcell-sub">活跃浏览器标签页</div>
+    </div>
+    <div class="eg-statcell">
+        <div class="eg-statcell-label">最后广播</div>
+        <div class="eg-statcell-value">@lastBroadcast</div>
+        <div class="eg-statcell-sub">new-log 最后触发时间</div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">订阅者列表</div>
+    <div class="card-body">
+        @if (subscribers.Count == 0)
+        {
+            <p class="text-muted text-center my-4">暂无活跃订阅</p>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>消息类型</th>
+                        <th class="text-end">订阅者数</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var kv in subscribers)
+                    {
+                        <tr>
+                            <td><code>@kv.Key</code></td>
+                            <td class="text-end">@kv.Value</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        @onclick="() => BroadcastTest(kv.Key)">
+                                    测试广播
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">跨标签页同步状态</div>
+    <div class="card-body">
+        @if (syncUsers.Count == 0)
+        {
+            <p class="text-muted text-center my-4">暂无活跃的跨标签页同步用户</p>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>用户 Key</th>
+                        <th class="text-end">标签页数</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var kv in syncUsers)
+                    {
+                        <tr>
+                            <td><code>@kv.Key</code></td>
+                            <td class="text-end">@kv.Value</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private int newLogCount;
+    private int serviceStateCount;
+    private int totalConnections;
+    private string lastBroadcast = "—";
+    private Dictionary<string, int> subscribers = new();
+    private Dictionary<string, int> syncUsers = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        newLogCount = Notifications.SubscriberCount("new-log");
+        serviceStateCount = Notifications.SubscriberCount("service-state");
+        totalConnections = newLogCount + serviceStateCount;
+
+        var lastBcast = Notifications.GetLastBroadcastTime("new-log");
+        lastBroadcast = lastBcast?.ToLocalTime().ToString("HH:mm:ss") ?? "—";
+
+        // Aggregate all subscriber counts
+        subscribers = new Dictionary<string, int>
+        {
+            ["new-log"] = newLogCount,
+            ["service-state"] = serviceStateCount,
+        };
+
+        // Sync users - we'll expose this via a method on the service
+        syncUsers = Notifications.GetUserConnectionCounts();
+
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    private void BroadcastTest(string messageType)
+    {
+        Notifications.BroadcastImmediate(messageType, new Services.NotificationContext
+        {
+            Model = "[test]", Service = "[test]", Provider = "[test]"
+        });
+    }
+}

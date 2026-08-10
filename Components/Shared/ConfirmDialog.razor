@@ -1,0 +1,52 @@
+@* Shared in-app confirmation dialog replacing the browser-native confirm()
+   (which blocks the whole page and looks nothing like the rest of the UI).
+   Usage:
+     <ConfirmDialog @ref="confirm" />
+     if (!await confirm!.ShowAsync("确认删除？")) return;  *@
+
+@if (visible)
+{
+    <div class="modal d-block eg-modal-backdrop" tabindex="-1" @onclick="() => Close(false)">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" @onclick="() => Close(false)"></button>
+                </div>
+                <div class="modal-body">@Message</div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => Close(false)">取消</button>
+                    <button class="btn @ConfirmButtonClass" @onclick="() => Close(true)">@ConfirmText</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Title { get; set; } = "确认操作";
+    [Parameter] public string ConfirmText { get; set; } = "确认";
+    [Parameter] public string ConfirmButtonClass { get; set; } = "btn-danger";
+
+    private bool visible;
+    private string Message = "";
+    private TaskCompletionSource<bool>? tcs;
+
+    public Task<bool> ShowAsync(string message, string? title = null, string? confirmText = null)
+    {
+        Message = message;
+        if (title is not null) Title = title;
+        if (confirmText is not null) ConfirmText = confirmText;
+        visible = true;
+        tcs = new TaskCompletionSource<bool>();
+        StateHasChanged();
+        return tcs.Task;
+    }
+
+    private void Close(bool result)
+    {
+        visible = false;
+        tcs?.TrySetResult(result);
+        StateHasChanged();
+    }
+}

@@ -1,0 +1,36 @@
+.eg-filterbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    background: var(--eg-surface);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-lg);
+    box-shadow: var(--eg-shadow-sm);
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.3rem;
+}
+
+.eg-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 130px;
+}
+
+    .eg-filter > label {
+        font-size: 0.74rem;
+        font-weight: 600;
+        color: var(--eg-text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+.eg-filter-grow { flex: 1; min-width: 180px; }
+
+.eg-filter-actions {
+    flex-direction: row;
+    gap: 0.5rem;
+    margin-left: auto;
+    align-items: center;
+}

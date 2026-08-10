@@ -1,0 +1,167 @@
+@page "/dispatch-trace"
+@inject HttpClient Http
+@using YuSwitch.Services
+
+<PageTitle>路由追踪</PageTitle>
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">路由追踪</h1>
+        <p class="eg-sub">请求路由与分发明细：模型别名 → 真实上游模型</p>
+    </div>
+    <div class="d-flex gap-3 align-items-center">
+        <RealtimeStatus />
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@loading">
+            @if (loading) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
+        </button>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <label class="small text-muted mb-0">模型</label>
+    <select class="form-select form-select-sm" style="width:240px" value="@modelFilter" @onchange="OnModelChange">
+        <option value="">全部模型</option>
+        @foreach (var m in modelOptions) { <option value="@m">@m</option> }
+    </select>
+    <small class="text-muted">仅显示最近 @PageSize 条记录</small>
+</div>
+
+@if (loading)
+{
+    <p><span class="spinner-border spinner-border-sm"></span> 加载中...</p>
+}
+else if (loadError)
+{
+    <div class="alert alert-danger d-flex justify-content-between align-items-center">
+        <span>路由数据加载失败，请检查服务状态后重试。</span>
+        <button class="btn btn-sm btn-outline-danger" @onclick="LoadAsync">重试</button>
+    </div>
+}
+else if (logs is null || logs.Count == 0)
+{
+    <div class="alert alert-info">没有符合条件的路由记录。</div>
+}
+else
+{
+    <div class="eg-table-card">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th style="width:88px">时间</th>
+                    <th>API Key</th>
+                    <th>模型 (别名 → 上游)</th>
+                    <th style="width:110px">服务</th>
+                    <th style="width:120px" class="text-end">Tokens (提示/回复)</th>
+                    <th style="width:90px" class="text-end">延迟(ms)</th>
+                    <th style="width:80px" class="text-end">TTFB(ms)</th>
+                    <th style="width:56px">状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in logs)
+                {
+                    <tr>
+                        <td><small>@FormatTime(l.timestamp)</small></td>
+                        <td><small>@Dash(l.apiKey)</small></td>
+                        <td>
+                            <span class="eg-chain">
+                                <code>@l.model</code>
+                                @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
+                                {
+                                    <span class="eg-chain-arrow">→</span>
+                                    <code>@l.upstreamModel</code>
+                                }
+                            </span>
+                        </td>
+                        <td><small>@Dash(l.service)</small></td>
+                        <td class="text-end"><small>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens)</small></td>
+                        <td class="text-end"><small>@UiFormat.N(l.latencyMs)</small></td>
+                        <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.N(l.ttftMs) : "-")</small></td>
+                        <td>
+                            @if (l.success) { <span class="badge bg-success">成功</span> }
+                            else { <span class="badge bg-danger">@l.statusCode</span> }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private List<CallLog>? logs;
+    private List<string> modelOptions = new();
+    private string modelFilter = "";
+    private bool loading = true;
+    private bool loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Populate the model dropdown from the same filters endpoint the shared
+        // filter bar uses; a failure only means an empty dropdown, not an error.
+        try
+        {
+            var f = await Http.GetFromJsonAsync<FilterOptions>("/admin/usage/filters");
+            modelOptions = f?.Models ?? new();
+        }
+        catch { modelOptions = new(); }
+
+        await LoadAsync();
+    }
+
+    private Task OnModelChange(ChangeEventArgs e)
+    {
+        modelFilter = e.Value?.ToString() ?? "";
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        loadError = false;
+        StateHasChanged();
+        var qs = $"?limit={PageSize}&offset=0&model={Uri.EscapeDataString(modelFilter)}" +
+                 $"&service=&provider=&status=&q=";
+        try
+        {
+            var result = await Http.GetFromJsonAsync<CallLogPage>("/admin/call-logs" + qs);
+            logs = result?.items ?? new();
+        }
+        catch
+        {
+            // Distinguish "endpoint failed" from "genuinely no data".
+            logs = new();
+            loadError = true;
+        }
+        loading = false;
+    }
+
+    // ISO "yyyy-MM-ddTHH:mm:ss..." → HH:mm:ss
+    private static string FormatTime(string? ts) =>
+        string.IsNullOrEmpty(ts) || ts.Length < 16 ? (ts ?? "-") : ts.Substring(11, 8);
+
+    private static string Dash(string? v) => string.IsNullOrEmpty(v) ? "-" : v;
+
+    private class CallLogPage
+    {
+        public int total { get; set; }
+        public List<CallLog>? items { get; set; }
+    }
+
+    private class CallLog
+    {
+        public string? timestamp { get; set; }
+        public string? model { get; set; }
+        public string? upstreamModel { get; set; }
+        public string? service { get; set; }
+        public string? apiKey { get; set; }
+        public bool success { get; set; }
+        public string? statusCode { get; set; }
+        public int promptTokens { get; set; }
+        public int completionTokens { get; set; }
+        public long latencyMs { get; set; }
+        public long ttftMs { get; set; }
+    }
+}

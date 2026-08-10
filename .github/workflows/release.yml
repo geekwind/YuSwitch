@@ -1,0 +1,185 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # Trigger on version tags like v1.0.0
+  workflow_dispatch:  # Manual trigger (builds + uploads artifacts, no release)
+
+permissions:
+  contents: write     # Needed to create GitHub Releases
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project is dual-targeted (net8.0 headless + net8.0-windows desktop
+        # shell). dotnet publish on a dual-targeted csproj REQUIRES -f, and the
+        # desktop GUI/WebView2 only compiles for net8.0-windows (on Windows).
+        include:
+          - os: windows-latest
+            rid: win-x64
+            tfm: net8.0-windows
+            archive: zip
+          - os: windows-latest
+            rid: win-arm64
+            tfm: net8.0-windows
+            archive: zip
+          - os: ubuntu-latest
+            rid: linux-x64
+            tfm: net8.0
+            archive: tar.gz
+          - os: ubuntu-latest
+            rid: linux-arm64
+            tfm: net8.0
+            archive: tar.gz
+          - os: macos-latest
+            rid: osx-x64
+            tfm: net8.0
+            archive: tar.gz
+          - os: macos-latest
+            rid: osx-arm64
+            tfm: net8.0
+            archive: tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish single-file (self-contained, embedded assets)
+        shell: bash
+        run: |
+          # Embed the release version into the binary. On a tag push
+          # GITHUB_REF=refs/tags/vX.Y.Z → X.Y.Z; otherwise fall back to 0.0.0
+          # (the version label "latest" is not a valid System.Version).
+          BINVERSION="${GITHUB_REF#refs/tags/}"
+          BINVERSION="${BINVERSION#v}"
+          case "$BINVERSION" in
+            *[!0-9.]*) BINVERSION="0.0.0";;
+          esac
+          echo "Binary version: $BINVERSION"
+          dotnet publish YuSwitch.csproj \
+            -c Release \
+            -f ${{ matrix.tfm }} \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=embedded \
+            -p:Version="$BINVERSION" \
+            -o ./publish
+
+      - name: Resolve version label
+        id: version
+        shell: bash
+        # On a tag push GITHUB_REF is refs/tags/vX.Y.Z → strip to vX.Y.Z.
+        # On manual/branch runs it's refs/heads/<branch> → normalize to 'latest'
+        # so artifact names stay clean (release assets only attach on tags).
+        run: |
+          REF="${GITHUB_REF#refs/tags/}"
+          case "$REF" in refs/*) REF="latest";; esac
+          [ -z "$REF" ] && REF="latest"
+          echo "VERSION=$REF" >> $GITHUB_OUTPUT
+
+      - name: Package (single binary + example config)
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.VERSION }}"
+          echo "Version label: $VER"
+          mkdir -p dist
+          cd publish
+          # The exe is truly single-file (wwwroot + scoped CSS embedded via the
+          # build manifest). Keep only the binary; ship appsettings as an example.
+          if [ -f "YuSwitch.exe" ]; then
+            cp YuSwitch.exe ../dist/
+          elif [ -f "YuSwitch" ]; then
+            cp YuSwitch ../dist/
+            chmod +x ../dist/YuSwitch
+          else
+            echo "::error::No YuSwitch binary found in publish output"
+            ls -la
+            exit 1
+          fi
+          cp appsettings.json ../dist/appsettings.example.json 2>/dev/null || true
+          cd ../dist
+          ARCHIVE="../YuSwitch-${{ matrix.rid }}-${VER}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "${ARCHIVE}.zip" *
+          else
+            tar czf "${ARCHIVE}.tar.gz" *
+          fi
+          cd ..
+          ls -lh YuSwitch-*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuSwitch-${{ matrix.rid }}
+          path: |
+            YuSwitch-*.zip
+            YuSwitch-*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lhR artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.zip
+            artifacts/*.tar.gz
+          body: |
+            ## YuSwitch ${{ github.ref_name }}
+
+            > 基于 .NET 8 的 AI 模型网关 —— OpenAI / Anthropic 双协议兼容，内置 Blazor Server 管理界面，单文件无依赖运行。
+
+            ### 下载
+
+            | 平台 | 文件 | 说明 |
+            |---|---|---|
+            | Windows x64 | `YuSwitch-win-x64-*.zip` | 含桌面 GUI（WebView2） |
+            | Windows ARM64 | `YuSwitch-win-arm64-*.zip` | 含桌面 GUI（WebView2） |
+            | Linux x64 | `YuSwitch-linux-x64-*.tar.gz` | headless |
+            | Linux ARM64 | `YuSwitch-linux-arm64-*.tar.gz` | headless |
+            | macOS Intel | `YuSwitch-osx-x64-*.tar.gz` | headless |
+            | macOS Apple Silicon | `YuSwitch-osx-arm64-*.tar.gz` | headless |
+
+            ### 使用
+
+            1. 下载对应平台的压缩包并解压
+            2. 运行 `YuSwitch.exe`（Windows，含桌面窗口）或 `./YuSwitch`（Linux/macOS）
+            3. 浏览器访问 `http://localhost:5078`（Windows 桌面模式会自动打开窗口）
+            4. 首页点击「初始化示例配置」一键配置上游
+
+            ### 特性
+
+            - ✅ OpenAI + Anthropic 双协议入站
+            - ✅ 多上游 provider 负载均衡 + 优先级 failover + Sticky Session
+            - ✅ 模型别名映射（多服务商同名模型）
+            - ✅ Blazor Server 管理界面（嵌入单文件）
+            - ✅ 监听地址/端口可配置 + 端口占用预检 + 一键重启
+            - ✅ 调用日志、调度追踪、用量统计
+            - ✅ 无需 .NET 运行时，单文件自包含
+
+            详细说明见 [README](https://github.com/geekwind/easy-ai-gateway/blob/main/README.md)

@@ -1,0 +1,673 @@
+@page "/services"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ToastService Toasts
+
+<PageTitle>服务管理</PageTitle>
+
+<ConfirmDialog @ref="confirm" />
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">服务管理</h1>
+        <p class="eg-sub">管理上游 AI 服务与其模型映射</p>
+    </div>
+    <button class="btn btn-primary" @onclick="OpenCreate">+ 新建服务</button>
+</div>
+
+@if (services is null)
+{
+    <p><span class="spinner-border spinner-border-sm"></span> 加载中...</p>
+}
+else if (services.Count == 0)
+{
+    <div class="alert alert-info">还没有配置任何服务。点击「新建服务」或<a href="">回到仪表盘初始化示例</a>。</div>
+}
+else
+{
+    <div class="d-flex mb-2">
+        <input class="form-control" style="max-width:300px" placeholder="搜索名称 / 类型 / 地址…" @bind="search" @bind:event="oninput" />
+    </div>
+    <div class="eg-table-card">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>类型</th>
+                <th>上游地址</th>
+                <th>状态</th>
+                <th class="text-end">模型数</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in FilteredServices)
+            {
+                <tr>
+                    <td>@s.Id</td>
+                    <td>@s.Name</td>
+                    <td><span class="badge bg-info text-dark">@s.ProviderType</span></td>
+                    <td><small class="text-muted">@Truncate(s.ServerUrl, 50)</small></td>
+                    <td>
+                        <div class="form-check form-switch mb-0" title="@(s.Enabled ? "点击停用" : "点击启用")">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   checked="@s.Enabled" @onchange="() => ToggleService(s)" />
+                        </div>
+                    </td>
+                    <td class="text-end">@(s.Models?.Count ?? 0)</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary me-1" disabled="@IsBusy(s.Id, "test")" @onclick="() => TestService(s.Id)">
+                            @if (IsBusy(s.Id, "test")) { <span class="spinner-border spinner-border-sm"></span> } else { <text>测试</text> }
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => EditModels(s)">模型</button>
+                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenEdit(s)">编辑</button>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" @onclick="() => ToggleMenu(s.Id)" @onclick:stopPropagation="true">更多</button>
+                            @if (openMenuId == s.Id)
+                            {
+                                <div class="dropdown-menu show" style="position:absolute;right:0;top:100%">
+                                    <button class="dropdown-item" disabled="@IsBusy(s.Id, "discover")" @onclick="() => DiscoverModels(s.Id)">
+                                        @(IsBusy(s.Id, "discover") ? "发现中…" : "发现模型")
+                                    </button>
+                                    <button class="dropdown-item" disabled="@IsBusy(s.Id, "clone")" @onclick="() => CloneService(s)">克隆</button>
+                                    <div class="dropdown-divider"></div>
+                                    <button class="dropdown-item text-danger" disabled="@IsBusy(s.Id, "del")" @onclick="() => DeleteService(s.Id)">删除</button>
+                                </div>
+                            }
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+@if (showEditor)
+{
+    <div class="modal d-block eg-modal-backdrop" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "新建服务" : $"编辑服务 #{editing.Id}")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditor"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">名称</label>
+                            <input class="form-control @(fieldErrors.ContainsKey("name") ? "is-invalid" : "")" @bind="editing.Name" />
+                            @if (fieldErrors.TryGetValue("name", out var nameErr))
+                            { <div class="invalid-feedback d-block">@nameErr</div> }
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Provider 类型</label>
+                            <select class="form-select" @bind="editing.ProviderType">
+                                @foreach (var t in providerTypes ?? new())
+                                { <option value="@t">@t</option> }
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">上游地址 (ServerUrl)</label>
+                            <input class="form-control @(fieldErrors.ContainsKey("serverUrl") ? "is-invalid" : "")" placeholder="https://api.example.com/v1" @bind="editing.ServerUrl" />
+                            @if (fieldErrors.TryGetValue("serverUrl", out var urlErr))
+                            { <div class="invalid-feedback d-block">@urlErr</div> }
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">API Key</label>
+                            <input class="form-control font-monospace" type="password" placeholder="sk-..." @bind="editingApiKey" />
+                            <small class="text-muted">上游服务的 API Key。编辑时显示为掩码（如 sk-****abcd），保持不动即不修改；输入新值则覆盖</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">权重</label>
+                            <InputNumber class="form-control" @bind-Value="editing.Weight" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">优先级</label>
+                            <InputNumber class="form-control" @bind-Value="editing.Priority" />
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <InputCheckbox id="en" @bind-Value="editing.Enabled" />
+                                <label class="form-check-label" for="en">启用</label>
+                            </div>
+                        </div>
+                        <div class="col-md-12">
+                            <hr class="my-2" />
+                            <h6 class="fw-bold mb-1">限额 / 限流</h6>
+                            <small class="text-muted">留空表示不限制。</small>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">QPS</label>
+                            <InputNumber class="form-control" @bind-Value="limitQps" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">QPM</label>
+                            <InputNumber class="form-control" @bind-Value="limitQpm" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">并发</label>
+                            <InputNumber class="form-control" @bind-Value="limitConcurrency" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">超时秒</label>
+                            <InputNumber class="form-control" @bind-Value="limitTimeoutSeconds" />
+                        </div>
+                        <div class="col-md-12">
+                            <hr class="my-2" />
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="fw-bold mb-1">模型重定向</h6>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="AddRedirect">+ 添加</button>
+                            </div>
+                            <small class="text-muted">来源模型 → 目标模型：请求模型名命中「来源模型」时改写为「目标模型」发送给上游。</small>
+                            @if (redirects.Count == 0)
+                            {
+                                <p class="text-muted small mt-2 mb-1">暂无重定向。</p>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-column gap-2 mt-2">
+                                    @foreach (var r in redirects)
+                                    {
+                                        <div class="d-flex gap-2 align-items-center">
+                                            <input class="form-control form-control-sm" placeholder="来源模型" @bind="r.Key" />
+                                            <span class="text-muted">→</span>
+                                            <input class="form-control form-control-sm" placeholder="目标模型" @bind="r.Value" />
+                                            <button class="btn btn-sm btn-outline-danger text-nowrap" @onclick="() => RemoveRedirect(r)">移除</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <div class="col-md-12">
+                            <hr class="my-2" />
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="fw-bold mb-1">模型映射</h6>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="AddModelMap">+ 添加</button>
+                            </div>
+                            <small class="text-muted">外部名称 → 内部模型名：将客户端请求的模型名映射到本服务实际模型名。</small>
+                            @if (modelMap.Count == 0)
+                            {
+                                <p class="text-muted small mt-2 mb-1">暂无映射。</p>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-column gap-2 mt-2">
+                                    @foreach (var m in modelMap)
+                                    {
+                                        <div class="d-flex gap-2 align-items-center">
+                                            <input class="form-control form-control-sm" placeholder="外部名称" @bind="m.Key" />
+                                            <span class="text-muted">→</span>
+                                            <input class="form-control form-control-sm" placeholder="内部模型名" @bind="m.Value" />
+                                            <button class="btn btn-sm btn-outline-danger text-nowrap" @onclick="() => RemoveModelMap(m)">移除</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseEditor">取消</button>
+                    <button class="btn btn-primary" @onclick="SaveService" disabled="@saving">
+                        @if (saving) { <span class="spinner-border spinner-border-sm"></span> <text> 保存中…</text> } else { <text>保存</text> }
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- 模型管理 Modal -->
+@if (showModels)
+{
+    <div class="modal d-block eg-modal-backdrop" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">模型管理 — @modelsService?.Name <small class="text-muted fs-6">(@(models?.Count ?? 0) 个)</small></h5>
+                    <button type="button" class="btn-close" @onclick="CloseModels"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 small">
+                        <strong>模型映射</strong>：ModelName 是客户端看到的名称；UpstreamModel 是发给上游的真实名（留空=同 ModelName）；Aliases 是额外匹配名（逗号分隔）。
+                        点击表格中的行可直接编辑该模型。
+                    </div>
+                    @if (modelError is not null)
+                    {
+                        <div class="alert alert-danger py-2 small">@modelError</div>
+                    }
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-3">
+                            <input class="form-control" placeholder="模型名称 (客户端)" @bind="newModelName" />
+                        </div>
+                        <div class="col-md-3">
+                            <input class="form-control" placeholder="上游真实名 (留空=同名)" @bind="newModelUpstream" />
+                        </div>
+                        <div class="col-md-3">
+                            <input class="form-control" placeholder="别名 (逗号分隔)" @bind="newModelAliases" />
+                        </div>
+                        <div class="col-md-1">
+                            <div class="form-check">
+                                <InputCheckbox id="vis" @bind-Value="newModelVision" />
+                                <label class="form-check-label" for="vis">视觉</label>
+                            </div>
+                        </div>
+                        <div class="col-md-1">
+                            <div class="form-check">
+                                <InputCheckbox id="tool" @bind-Value="newModelTools" />
+                                <label class="form-check-label" for="tool">工具</label>
+                            </div>
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-outline-primary w-100" @onclick="AddModel">+</button>
+                        </div>
+                    </div>
+                    <table class="table table-sm table-hover align-middle">
+                        <thead><tr><th>客户端名</th><th>上游名</th><th>别名</th><th>视觉</th><th>工具</th><th>启用</th><th style="width:130px"></th></tr></thead>
+                        <tbody>
+                            @foreach (var m in models ?? new())
+                            {
+                                @if (editingModelId == m.Id)
+                                {
+                                    <tr class="table-active">
+                                        <td><input class="form-control form-control-sm" @bind="editingModel.ModelName" /></td>
+                                        <td><input class="form-control form-control-sm" placeholder="(同名)" @bind="editingModel.UpstreamModel" /></td>
+                                        <td><input class="form-control form-control-sm" placeholder="别名 (逗号分隔)" @bind="editingModel.Aliases" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="editingModel.SupportsVision" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="editingModel.SupportsTools" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="editingModel.Enabled" /></td>
+                                        <td class="text-nowrap">
+                                            <button class="btn btn-sm btn-primary me-1" @onclick="SaveModelEdit">保存</button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelModelEdit">取消</button>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr style="cursor:pointer" title="点击编辑" @onclick="() => StartModelEdit(m)">
+                                        <td>@m.ModelName</td>
+                                        <td><small class="text-muted">@(string.IsNullOrEmpty(m.UpstreamModel) ? "(同名)" : m.UpstreamModel)</small></td>
+                                        <td><small class="text-muted">@m.Aliases</small></td>
+                                        <td>@if (m.SupportsVision) { <span class="badge bg-success">✓</span> }</td>
+                                        <td>@if (m.SupportsTools) { <span class="badge bg-success">✓</span> }</td>
+                                        <td>@if (m.Enabled) { <span class="badge bg-success">✓</span> } else { <span class="badge bg-secondary">停用</span> }</td>
+                                        <td><button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteModel(m.Id)" @onclick:stopPropagation="true">删除</button></td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ServiceEntity>? services;
+    private List<string>? providerTypes;
+    private bool showEditor;
+    private bool showModels;
+    private ServiceEntity editing = new();
+    private string editingApiKey = "";
+    private ServiceEntity? modelsService;
+    private List<ModelEntity>? models;
+    private int editingModelId;
+    private ModelEntity editingModel = new();
+    private string newModelName = "";
+    private string newModelUpstream = "";
+    private string newModelAliases = "";
+    private bool newModelVision;
+    private bool newModelTools;
+    private readonly HashSet<string> busy = new();
+    private bool saving;
+    private Dictionary<string, string> fieldErrors = new();
+    private int openMenuId;
+    private string search = "";
+    private ConfirmDialog? confirm;
+    private string? modelError;
+
+    // Editor state for the 限额 / 模型重定向 / 模型映射 controls.
+    private double? limitQps;
+    private double? limitQpm;
+    private double? limitConcurrency;
+    private int? limitTimeoutSeconds;
+    private List<MapRow> redirects = new();
+    private List<MapRow> modelMap = new();
+
+    // Serialize with PascalCase so ServiceEntity.GetLimit()/GetModelRedirects()/
+    // GetModelMap() (which read with default, case-sensitive options) can parse
+    // what we write. WhenWritingNull omits the empty sections from the payload,
+    // so null never reaches the NOT NULL JSON columns (the server binds the
+    // "{}" property default instead).
+    private static readonly System.Text.Json.JsonSerializerOptions SaveJsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private IEnumerable<ServiceEntity> FilteredServices =>
+        string.IsNullOrWhiteSpace(search)
+            ? services ?? Enumerable.Empty<ServiceEntity>()
+            : (services ?? new()).Where(s =>
+                s.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || s.ProviderType.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || s.ServerUrl.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    private bool IsBusy(int id, string op) => busy.Contains($"{op}:{id}");
+
+    private void ToggleMenu(int id) => openMenuId = openMenuId == id ? 0 : id;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        try { providerTypes = await Http.GetFromJsonAsync<List<string>>("/admin/provider-types"); } catch { }
+    }
+
+    private async Task LoadAsync()
+    {
+        try { services = await Http.GetFromJsonAsync<List<ServiceEntity>>("/admin/services"); }
+        catch { services = new(); }
+    }
+
+    private void OpenCreate()
+    {
+        editing = new ServiceEntity { ProviderType = "openai", Enabled = true, CredentialsJson = "{}", Weight = 1 };
+        editingApiKey = "";
+        ResetEditorExtras();
+        fieldErrors.Clear();
+        showEditor = true;
+    }
+
+    private void OpenEdit(ServiceEntity s)
+    {
+        editing = new ServiceEntity
+        {
+            Id = s.Id, Name = s.Name, ProviderType = s.ProviderType,
+            ServerUrl = s.ServerUrl, Enabled = s.Enabled, Weight = s.Weight,
+            Priority = s.Priority, CredentialsJson = s.CredentialsJson,
+        };
+        // Extract api_key from existing credentials JSON for editing. The value
+        // arrives MASKED from the server (sk-1****abcd); leaving it untouched
+        // round-trips the mask and the server keeps the stored secret.
+        try { editingApiKey = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(s.CredentialsJson ?? "{}")?.GetValueOrDefault("api_key", "") ?? ""; }
+        catch { editingApiKey = ""; }
+        // Pre-populate the limit / redirect / map controls from the stored JSON
+        // (zero values mean "unset" and show as empty inputs).
+        var lim = s.GetLimit();
+        limitQps = lim.Qps == 0 ? null : lim.Qps;
+        limitQpm = lim.Qpm == 0 ? null : lim.Qpm;
+        limitConcurrency = lim.Concurrency == 0 ? null : lim.Concurrency;
+        limitTimeoutSeconds = lim.TimeoutSeconds == 0 ? null : lim.TimeoutSeconds;
+        redirects = s.GetModelRedirects().Select(kv => new MapRow { Key = kv.Key, Value = kv.Value }).ToList();
+        modelMap = s.GetModelMap().Select(kv => new MapRow { Key = kv.Key, Value = kv.Value }).ToList();
+        fieldErrors.Clear();
+        showEditor = true;
+    }
+
+    private void CloseEditor() => showEditor = false;
+
+    private async Task SaveService()
+    {
+        saving = true;
+        fieldErrors.Clear();
+        try
+        {
+            // Pack the api_key into credentials JSON before saving.
+            editing.CredentialsJson = System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, string> { ["api_key"] = editingApiKey ?? "" });
+            // Merge the editor's limit / redirect / map controls into the JSON
+            // columns. The controls were pre-populated from the existing service,
+            // so this round-trips stored values plus any user edits. PascalCase
+            // matches what ServiceEntity.GetLimit()/GetModelRedirects()/GetModelMap()
+            // expect on read; empty sections are nulled and omitted from the payload.
+            var limit = new LimitConfig();
+            if (limitQps.HasValue) limit.Qps = limitQps.Value;
+            if (limitQpm.HasValue) limit.Qpm = limitQpm.Value;
+            if (limitConcurrency.HasValue) limit.Concurrency = limitConcurrency.Value;
+            if (limitTimeoutSeconds.HasValue) limit.TimeoutSeconds = limitTimeoutSeconds.Value;
+            var hasLimit = limitQps.HasValue || limitQpm.HasValue
+                        || limitConcurrency.HasValue || limitTimeoutSeconds.HasValue;
+            editing.LimitJson = hasLimit ? System.Text.Json.JsonSerializer.Serialize(limit) : null!;
+
+            // GroupBy + First (not ToDictionary): duplicate source keys are
+            // tolerated by keeping the first occurrence, instead of throwing
+            // ArgumentException and escaping as an unhandled circuit error.
+            var redirectsOut = redirects
+                .Where(r => !string.IsNullOrWhiteSpace(r.Key))
+                .GroupBy(r => r.Key.Trim())
+                .ToDictionary(g => g.Key, g => g.First().Value ?? "");
+            editing.ModelRedirectJson = redirectsOut.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(redirectsOut) : null!;
+
+            var modelMapOut = modelMap
+                .Where(r => !string.IsNullOrWhiteSpace(r.Key))
+                .GroupBy(r => r.Key.Trim())
+                .ToDictionary(g => g.Key, g => g.First().Value ?? "");
+            editing.ModelMapJson = modelMapOut.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(modelMapOut) : null!;
+
+            var resp = editing.Id == 0
+                ? await Http.PostAsJsonAsync("/admin/services", editing, SaveJsonOpts)
+                : await Http.PutAsJsonAsync($"/admin/services/{editing.Id}", editing, SaveJsonOpts);
+            if (resp.IsSuccessStatusCode)
+            {
+                showEditor = false;
+                Toasts.Ok(editing.Id == 0 ? "服务已创建" : "服务已保存");
+                await LoadAsync();
+            }
+            else if (!await ShowFieldErrors(resp))
+            {
+                Toasts.Error(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        finally { saving = false; }
+    }
+
+    // Parses the structured {errors:{field:message}} 400 body; true if handled.
+    private async Task<bool> ShowFieldErrors(HttpResponseMessage resp)
+    {
+        if ((int)resp.StatusCode != 400) return false;
+        try
+        {
+            var body = await resp.Content.ReadFromJsonAsync<ValidationBody>();
+            if (body?.errors is { Count: > 0 })
+            {
+                fieldErrors = body.errors;
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private async Task ToggleService(ServiceEntity s)
+    {
+        var resp = await Http.PutAsJsonAsync($"/admin/services/{s.Id}/enable", new { enabled = !s.Enabled });
+        if (resp.IsSuccessStatusCode)
+        {
+            s.Enabled = !s.Enabled;
+            Toasts.Ok(s.Enabled ? $"「{s.Name}」已启用" : $"「{s.Name}」已停用");
+        }
+        else
+        {
+            Toasts.Error(await resp.Content.ReadAsStringAsync());
+            await LoadAsync();  // revert the visual toggle
+        }
+    }
+
+    private async Task CloneService(ServiceEntity s)
+    {
+        openMenuId = 0;
+        if (confirm is null || !await confirm.ShowAsync(
+            $"克隆服务「{s.Name}」及其全部模型？克隆出的副本默认停用。", "克隆服务", "克隆")) return;
+        busy.Add($"clone:{s.Id}");
+        try
+        {
+            var resp = await Http.PostAsync($"/admin/services/{s.Id}/clone", null);
+            if (resp.IsSuccessStatusCode) Toasts.Ok($"已克隆「{s.Name}」（默认停用）");
+            else Toasts.Error(await resp.Content.ReadAsStringAsync());
+            await LoadAsync();
+        }
+        finally { busy.Remove($"clone:{s.Id}"); }
+    }
+
+    private async Task DeleteService(int id)
+    {
+        openMenuId = 0;
+        if (confirm is null || !await confirm.ShowAsync("确认删除此服务及其所有模型？", "删除服务", "删除")) return;
+        busy.Add($"del:{id}");
+        try
+        {
+            await Http.DeleteAsync($"/admin/services/{id}");
+            Toasts.Ok("服务已删除");
+            await LoadAsync();
+        }
+        finally { busy.Remove($"del:{id}"); }
+    }
+
+    private async Task TestService(int id)
+    {
+        busy.Add($"test:{id}");
+        try
+        {
+            var resp = await Http.PostAsync($"/admin/services/{id}/test", null);
+            var result = await resp.Content.ReadFromJsonAsync<TestResult>();
+            if (result!.ok) Toasts.Ok($"连通成功，模型: {result.model}");
+            else Toasts.Error($"测试失败: {result.error}");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error($"请求失败: {ex.Message}");
+        }
+        finally { busy.Remove($"test:{id}"); }
+    }
+
+    private async Task DiscoverModels(int id)
+    {
+        openMenuId = 0;
+        busy.Add($"discover:{id}");
+        try
+        {
+            var resp = await Http.PostAsync($"/admin/services/{id}/discover-models", null);
+            var result = await resp.Content.ReadFromJsonAsync<DiscoverResult>();
+            if (result!.ok)
+            {
+                var msg = $"发现 {result.total} 个模型 · 新导入 {result.imported?.Count ?? 0} · 已存在跳过 {result.skipped?.Count ?? 0}";
+                Toasts.Ok(msg);
+            }
+            else
+            {
+                Toasts.Info(result.message ?? result.reason ?? "未发现新模型");
+            }
+            // Refresh models list if that service's modal is open.
+            if (modelsService?.Id == id)
+                models = await Http.GetFromJsonAsync<List<ModelEntity>>($"/admin/services/{id}/models");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error($"请求失败: {ex.Message}");
+        }
+        finally { busy.Remove($"discover:{id}"); }
+    }
+
+    private async Task EditModels(ServiceEntity s)
+    {
+        modelsService = s;
+        showModels = true;
+        modelError = null;
+        try { models = await Http.GetFromJsonAsync<List<ModelEntity>>($"/admin/services/{s.Id}/models"); }
+        catch { models = new(); }
+    }
+
+    private void CloseModels()
+    {
+        showModels = false;
+        editingModelId = 0;
+    }
+
+    private void StartModelEdit(ModelEntity m)
+    {
+        editingModelId = m.Id;
+        modelError = null;
+        // Edit a copy so 取消 leaves the row untouched.
+        editingModel = new ModelEntity
+        {
+            Id = m.Id, ServiceId = m.ServiceId,
+            ModelName = m.ModelName, UpstreamModel = m.UpstreamModel, Aliases = m.Aliases,
+            Enabled = m.Enabled, SupportsVision = m.SupportsVision, SupportsTools = m.SupportsTools,
+            SupportsReasoning = m.SupportsReasoning, SupportsEmbeddings = m.SupportsEmbeddings,
+        };
+    }
+
+    private void CancelModelEdit() { editingModelId = 0; modelError = null; }
+
+    private async Task SaveModelEdit()
+    {
+        if (string.IsNullOrWhiteSpace(editingModel.ModelName))
+        {
+            modelError = "模型名称不能为空";
+            return;
+        }
+        var resp = await Http.PutAsJsonAsync($"/admin/models/{editingModel.Id}", editingModel);
+        if (!resp.IsSuccessStatusCode)
+        {
+            modelError = await resp.Content.ReadAsStringAsync();
+            return;
+        }
+        editingModelId = 0;
+        modelError = null;
+        Toasts.Ok("模型已保存");
+        if (modelsService is not null)
+            models = await Http.GetFromJsonAsync<List<ModelEntity>>($"/admin/services/{modelsService.Id}/models");
+    }
+
+    private async Task AddModel()
+    {
+        if (modelsService is null || string.IsNullOrWhiteSpace(newModelName)) return;
+        var m = new ModelEntity
+        {
+            ModelName = newModelName.Trim(),
+            UpstreamModel = newModelUpstream.Trim(),
+            Aliases = newModelAliases.Trim(),
+            Enabled = true,
+            SupportsVision = newModelVision,
+            SupportsTools = newModelTools,
+        };
+        await Http.PostAsJsonAsync($"/admin/services/{modelsService.Id}/models", m);
+        newModelName = ""; newModelUpstream = ""; newModelAliases = ""; newModelVision = false; newModelTools = false;
+        models = await Http.GetFromJsonAsync<List<ModelEntity>>($"/admin/services/{modelsService.Id}/models");
+    }
+
+    private async Task DeleteModel(int id)
+    {
+        await Http.DeleteAsync($"/admin/models/{id}");
+        if (modelsService is not null)
+            models = await Http.GetFromJsonAsync<List<ModelEntity>>($"/admin/services/{modelsService.Id}/models");
+    }
+
+    private void ResetEditorExtras()
+    {
+        limitQps = limitQpm = limitConcurrency = null;
+        limitTimeoutSeconds = null;
+        redirects = new();
+        modelMap = new();
+    }
+
+    private void AddRedirect() => redirects.Add(new MapRow());
+    private void RemoveRedirect(MapRow r) => redirects.Remove(r);
+    private void AddModelMap() => modelMap.Add(new MapRow());
+    private void RemoveModelMap(MapRow r) => modelMap.Remove(r);
+
+    private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "...";
+
+    private class MapRow
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+
+    private class TestResult { public bool ok { get; set; } public string? model { get; set; } public string? error { get; set; } }
+    private class DiscoverResult { public bool ok { get; set; } public string? reason { get; set; } public string? message { get; set; } public int total { get; set; } public List<string>? imported { get; set; } public List<string>? skipped { get; set; } }
+    private class ValidationBody { public Dictionary<string, string>? errors { get; set; } }
+}

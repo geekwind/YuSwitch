@@ -1,0 +1,13 @@
+bin/
+obj/
+publish/
+logs/
+*.db
+*.db-*
+*.log
+*.user
+.vs/
+.idea/
+*.suo
+publish-*/
+dist/

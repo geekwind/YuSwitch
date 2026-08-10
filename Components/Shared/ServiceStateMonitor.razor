@@ -1,0 +1,138 @@
+@using System.Text.Json
+@inject HttpClient Http
+@inject RealtimeNotificationService Notifications
+@inject IHttpContextAccessor HttpContextAccessor
+@implements IDisposable
+
+@if (loading)
+{
+    <div class="text-muted small">加载服务状态中...</div>
+}
+else if (serviceStates is null || serviceStates.Count == 0)
+{
+    <div class="text-muted small">暂无服务</div>
+}
+else
+{
+    <div class="eg-service-states">
+        @foreach (var svc in serviceStates.OrderByDescending(s => s.inFlight))
+        {
+            var statusClass = svc.breakerOpen ? "text-danger" : (svc.ewmaMs < 200 ? "text-success" : "text-warning");
+            <div class="eg-service-state small mb-1" style="padding:4px 8px;background:#f8f9fa;border-radius:4px;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-600">@svc.name</span>
+                    <span>
+                        @if (svc.probeOk == false)
+                        { <span class="text-danger me-2" title="@svc.probeError">探测失败</span> }
+                        else if (svc.probeOk == true)
+                        { <span class="text-success me-2" title="主动探测通过 (@svc.probeLatencyMs ms)">探测正常</span> }
+                        <span class="@statusClass">@(svc.breakerOpen ? "熔断" : "正常")</span>
+                    </span>
+                </div>
+                <div class="d-flex gap-3 text-muted mt-1" style="font-size:11px;">
+                    <span>请求数: @svc.inFlight</span>
+                    <span>延迟: @svc.ewmaMs ms</span>
+                    <span>得分: @svc.score.ToString("F1")</span>
+                    @if (svc.cooldownRemainingMs > 0)
+                    {
+                        <span class="text-danger">冷却: @(svc.cooldownRemainingMs / 1000)s</span>
+                    }
+                    @if (svc.probeOk == false && !string.IsNullOrEmpty(svc.probeError))
+                    {
+                        <span class="text-danger text-truncate" style="max-width:280px" title="@svc.probeError">@svc.probeError</span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<(string name, int inFlight, long ewmaMs, double score, bool breakerOpen, int cooldownRemainingMs, bool? probeOk, long? probeLatencyMs, string? probeError)>? serviceStates;
+    private bool loading = true;
+    private string? _connectionId;
+    private const int RefreshIntervalMs = 5000;
+    private readonly CancellationTokenSource _disposeCts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _connectionId = HttpContextAccessor?.HttpContext?.Connection.Id;
+        await LoadStatesAsync();
+
+        if (!string.IsNullOrEmpty(_connectionId))
+        {
+            Notifications.Subscribe(_connectionId, "service-state", _ => InvokeAsync(async () =>
+            {
+                await LoadStatesAsync();
+            }));
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Periodic refresh even without notifications. Stops when the
+            // component is disposed — otherwise the loop would keep the dead
+            // circuit alive forever.
+            try
+            {
+                while (!_disposeCts.IsCancellationRequested)
+                {
+                    await Task.Delay(RefreshIntervalMs, _disposeCts.Token);
+                    await InvokeAsync(async () =>
+                    {
+                        await LoadStatesAsync();
+                    });
+                }
+            }
+            catch (OperationCanceledException) { /* disposed */ }
+        }
+    }
+
+    private async Task LoadStatesAsync()
+    {
+        try
+        {
+            var states = await Http.GetFromJsonAsync<List<object>>("/admin/service-state");
+            if (states is null) return;
+
+            serviceStates = states.Select(s =>
+            {
+                var elem = (JsonElement)s;
+                return (
+                    name: elem.GetProperty("name").GetString() ?? "",
+                    inFlight: elem.GetProperty("inFlight").GetInt32(),
+                    ewmaMs: elem.GetProperty("ewmaMs").GetInt64(),
+                    score: elem.GetProperty("score").GetDouble(),
+                    breakerOpen: elem.GetProperty("breakerOpen").GetBoolean(),
+                    cooldownRemainingMs: elem.GetProperty("cooldownRemainingMs").GetInt32(),
+                    // Probe fields are null until the first probe cycle (or when disabled).
+                    probeOk: elem.TryGetProperty("probeOk", out var po) && po.ValueKind != JsonValueKind.Null
+                        ? po.GetBoolean() : (bool?)null,
+                    probeLatencyMs: elem.TryGetProperty("probeLatencyMs", out var pl) && pl.ValueKind == JsonValueKind.Number
+                        ? pl.GetInt64() : (long?)null,
+                    probeError: elem.TryGetProperty("probeError", out var pe) && pe.ValueKind == JsonValueKind.String
+                        ? pe.GetString() : null
+                );
+            }).ToList();
+            loading = false;
+        }
+        catch
+        {
+            serviceStates = new();
+            loading = false;
+        }
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+        if (!string.IsNullOrEmpty(_connectionId))
+        {
+            Notifications.Unsubscribe(_connectionId, "service-state");
+        }
+    }
+}

@@ -1,0 +1,101 @@
+@* Shared usage/log filter bar. Emits a query-string fragment the parent page
+   appends to its admin endpoints. *@
+@inject HttpClient Http
+
+<div class="eg-filterbar">
+    <div class="eg-filter">
+        <label>时间范围</label>
+        <select class="form-select form-select-sm" value="@Hours" @onchange="OnHours">
+            <option value="1">最近 1 小时</option>
+            <option value="6">最近 6 小时</option>
+            <option value="24">最近 24 小时</option>
+            <option value="72">最近 3 天</option>
+            <option value="168">最近 7 天</option>
+        </select>
+    </div>
+    <div class="eg-filter">
+        <label>模型</label>
+        <select class="form-select form-select-sm" value="@Model" @onchange="e => Set(ref model, e)">
+            <option value="">全部模型</option>
+            @foreach (var m in opts?.Models ?? new()) { <option value="@m">@m</option> }
+        </select>
+    </div>
+    <div class="eg-filter">
+        <label>服务</label>
+        <select class="form-select form-select-sm" value="@Service" @onchange="e => Set(ref service, e)">
+            <option value="">全部服务</option>
+            @foreach (var s in opts?.Services ?? new()) { <option value="@s">@s</option> }
+        </select>
+    </div>
+    <div class="eg-filter">
+        <label>Provider</label>
+        <select class="form-select form-select-sm" value="@Provider" @onchange="e => Set(ref provider, e)">
+            <option value="">全部 Provider</option>
+            @foreach (var p in opts?.Providers ?? new()) { <option value="@p">@p</option> }
+        </select>
+    </div>
+    @if (ShowKeyword)
+    {
+        <div class="eg-filter eg-filter-grow">
+            <label>关键字</label>
+            <input class="form-control form-control-sm" placeholder="搜索模型 / 内容…"
+                   value="@Keyword" @oninput="e => Set(ref keyword, e)" />
+        </div>
+    }
+    @if (ShowStatus)
+    {
+        <div class="eg-filter">
+            <label>状态</label>
+            <select class="form-select form-select-sm" value="@Status" @onchange="e => Set(ref status, e)">
+                <option value="">全部</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+            </select>
+        </div>
+    }
+    <div class="eg-filter eg-filter-actions">
+        <button class="btn btn-sm btn-primary" @onclick="Apply">查询</button>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Reset">重置</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool ShowKeyword { get; set; }
+    [Parameter] public bool ShowStatus { get; set; }
+    [Parameter] public EventCallback<FilterValues> OnApply { get; set; }
+
+    public record FilterValues(int Hours, string Model, string Service, string Provider, string Status, string Keyword);
+
+    private FilterOptions? opts;
+    private int hours = 24;
+    private string model = "", service = "", provider = "", status = "", keyword = "";
+
+    public int Hours => hours;
+    public string Model => model;
+    public string Service => service;
+    public string Provider => provider;
+    public string Status => status;
+    public string Keyword => keyword;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { opts = await Http.GetFromJsonAsync<FilterOptions>("/admin/usage/filters"); }
+        catch { opts = new(new(), new(), new()); }
+    }
+
+    private void Set(ref string field, ChangeEventArgs e) => field = e.Value?.ToString() ?? "";
+
+    private Task OnHours(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var h)) hours = h;
+        return Task.CompletedTask;
+    }
+
+    private Task Apply() => OnApply.InvokeAsync(new FilterValues(hours, model, service, provider, status, keyword));
+
+    private async Task Reset()
+    {
+        hours = 24; model = service = provider = status = keyword = "";
+        await Apply();
+    }
+}

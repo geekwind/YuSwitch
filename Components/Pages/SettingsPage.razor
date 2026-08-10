@@ -1,0 +1,568 @@
+﻿@page "/settings"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject AppSettingsService Settings
+@inject ToastService Toasts
+
+<PageTitle>@Settings.AppName · 设置</PageTitle>
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">设置</h1>
+        <p class="eg-sub">自定义软件名称、Logo 与外观信息</p>
+    </div>
+</div>
+
+<div class="card" style="max-width:680px">
+    <div class="card-header">基础信息</div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">软件名称</label>
+            <input class="form-control" @bind="appName" placeholder="@AppSettingsService.DefaultAppName" />
+            <small class="text-muted">显示在侧栏、浏览器标题与桌面窗口标题上</small>
+        </div>
+        <div class="mb-4">
+            <label class="form-label">副标题 / 描述</label>
+            <input class="form-control" @bind="subtitle" placeholder="@AppSettingsService.DefaultSubtitle" />
+        </div>
+
+        <label class="form-label">Logo</label>
+        <div class="eg-logo-picker">
+            <label class="eg-logo-opt @(logoType == "auto" ? "active" : "")">
+                <input type="radio" name="logoType" checked="@(logoType == "auto")" @onchange='() => logoType = "auto"' />
+                <span class="eg-logo-preview eg-logo-auto">@BrandInitials</span>
+                <span class="eg-logo-name">默认字母</span>
+            </label>
+            <label class="eg-logo-opt @(logoType == "emoji" ? "active" : "")">
+                <input type="radio" name="logoType" checked="@(logoType == "emoji")" @onchange='() => logoType = "emoji"' />
+                <span class="eg-logo-preview">@(logoType == "emoji" && !string.IsNullOrEmpty(logoEmoji) ? logoEmoji : "😀")</span>
+                <span class="eg-logo-name">Emoji</span>
+            </label>
+            <label class="eg-logo-opt @(logoType == "image" ? "active" : "")">
+                <input type="radio" name="logoType" checked="@(logoType == "image")" @onchange='() => logoType = "image"' />
+                <span class="eg-logo-preview">
+                    @if (!string.IsNullOrEmpty(logoImage))
+                    { <img src="@logoImage" alt="logo" /> }
+                    else
+                    { <Icon Name="image" Size="20" /> }
+                </span>
+                <span class="eg-logo-name">上传图片</span>
+            </label>
+        </div>
+
+        @if (logoType == "emoji")
+        {
+            <div class="mt-3">
+                <label class="form-label">选择一个 Emoji</label>
+                <input class="form-control" style="max-width:200px" @bind="logoEmoji" maxlength="4" placeholder="🚀" />
+            </div>
+        }
+        else if (logoType == "image")
+        {
+            <div class="mt-3">
+                <label class="form-label">上传 Logo 图片（建议正方形 PNG，&lt;100KB）</label>
+                <InputFile class="form-control" style="max-width:340px" OnChange="OnLogoFile" accept="image/*" />
+            </div>
+        }
+
+        <div class="d-flex gap-2 mt-4">
+            <button class="btn btn-primary" @onclick="Save" disabled="@saving">
+                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="Reset" disabled="@saving">恢复默认</button>
+        </div>
+        @if (saved)
+        {
+            <div class="alert alert-info py-2 small mt-3 mb-0">已保存，界面已更新。</div>
+        }
+    </div>
+</div>
+
+<div class="card mt-4" style="max-width:680px">
+    <div class="card-header">监听 / 网络</div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">监听地址</label>
+            <input class="form-control" @bind="listenHost" placeholder="localhost" />
+            <small class="text-muted">网关绑定的网卡地址。可选：<code>localhost</code> / <code>127.0.0.1</code>（仅本机）、<code>0.0.0.0</code> 或 <code>+</code>（所有网卡）、或具体 IP。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">监听端口</label>
+            <input class="form-control" style="max-width:200px" type="number" @bind="listenPort" placeholder="5078" />
+            <small class="text-muted">1–65535。端口被其他程序占用时，启动会提示而不会打开页面。</small>
+        </div>
+        @if (HostIsNonLoopback)
+        {
+            <div class="alert alert-warning py-2 small">
+                非 <code>localhost</code> 地址会让网关对局域网开放。远程访问管理界面必须先设置下方的「管理令牌」，否则远程请求会被拒绝。
+            </div>
+        }
+        <div class="mb-3">
+            <label class="form-label">管理令牌 (Admin Token)</label>
+            <div class="d-flex gap-2 align-items-start">
+                <input class="form-control font-monospace" style="max-width:420px" type="password"
+                       @bind="adminToken" placeholder="@(adminTokenSet ? "已设置（留空保持不变）" : "未设置（本机访问无需令牌）")" />
+                @if (adminTokenSet)
+                {
+                    <button class="btn btn-outline-secondary btn-sm mt-1" @onclick="ClearToken" disabled="@saving">清除令牌</button>
+                }
+            </div>
+            <small class="text-muted">
+                保护 <code>/admin</code> 与管理界面。本机 (localhost) 访问始终无需令牌；设置后，远程访问需携带
+                <code>?admin_token=令牌</code> 或 <code>X-Admin-Token</code> 请求头。未设置时，远程访问一律拒绝。
+            </small>
+        </div>
+        <div class="alert alert-info py-2 small mb-3">
+            监听地址与端口仅在启动时读取，<b>保存后需重启服务才能生效</b>。管理令牌保存后立即生效。
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <button class="btn btn-primary" @onclick="Save" disabled="@(saving || restarting)">
+                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+            </button>
+            <button class="btn btn-outline-primary" @onclick="Restart" disabled="@(saving || restarting)">
+                @if (restarting) { <span class="spinner-border spinner-border-sm"></span> <text>重启中…</text> }
+                else { <text>重启服务</text> }
+            </button>
+        </div>
+        @if (restartMsg != null)
+        {
+            <div class="alert alert-info py-2 small mt-3 mb-0">@restartMsg</div>
+        }
+    </div>
+</div>
+
+<div class="card mt-4" style="max-width:680px">
+    <div class="card-header">健康探测</div>
+    <div class="card-body">
+        <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="probeEnabled" @bind="probeEnabled" />
+            <label class="form-check-label" for="probeEnabled">启用主动健康探测</label>
+        </div>
+        <p class="text-muted small mb-3">
+            后台定时检测所有启用服务的连通性（优先用免费的 /models 接口，否则发 1 token 测试请求），
+            结果显示在仪表盘「服务实时状态」。长期无流量的坏渠道无需等真实请求即可发现。
+        </p>
+        <div class="mb-3">
+            <label class="form-label">探测间隔（秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="30" max="86400" @bind="probeIntervalS" />
+            <small class="text-muted">30–86400，默认 300（5 分钟）。保存后立即生效，无需重启。</small>
+        </div>
+        <button class="btn btn-primary" @onclick="SaveProbe" disabled="@saving">
+            @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+        </button>
+    </div>
+</div>
+
+<div class="card mt-4" style="max-width:680px">
+    <div class="card-header">负载均衡 / 熔断调优</div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            自适应负载均衡与熔断参数，保存后立即生效，无需重启。数值会按服务端允许范围自动修正。
+        </p>
+        <div class="mb-3">
+            <label class="form-label">EWMA 平滑系数</label>
+            <input class="form-control" style="max-width:200px" type="number" step="0.01" min="0.01" max="1" @bind="lbEwmaAlpha" />
+            <small class="text-muted">0.01–1，默认 0.3。越大越倾向近期延迟。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">熔断失败阈值</label>
+            <input class="form-control" style="max-width:200px" type="number" min="1" max="100" @bind="breakerFailureThreshold" />
+            <small class="text-muted">连续硬失败达到该次数后熔断（1–100，默认 3）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">熔断冷却基数（秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="1" max="3600" @bind="breakerCooldownBaseS" />
+            <small class="text-muted">首次冷却时长，后续按 ×1 / ×3 / ×6 递增（1–3600，默认 10）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">429 惩罚（毫秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="0" max="1000000" @bind="breaker429PenaltyMs" />
+            <small class="text-muted">429 窗口内对该渠道的附加扣分（0–1000000，默认 400）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">429 窗口（秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="1" max="3600" @bind="breaker429WindowS" />
+            <small class="text-muted">一次 429 影响评分的时长（1–3600，默认 30）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">在途惩罚（毫秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="0" max="1000000" @bind="inFlightPenaltyMs" />
+            <small class="text-muted">每个在途请求附加的扣分，用于避免扎堆（0–1000000，默认 500）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">EWMA 衰减（秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" step="0.1" min="0.1" max="3600" @bind="ewmaDecayS" />
+            <small class="text-muted">延迟回归基线的时间常数 τ（0.1–3600，默认 4）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">默认请求超时（秒）</label>
+            <input class="form-control" style="max-width:200px" type="number" min="5" max="3600" @bind="requestTimeoutDefaultS" />
+            <small class="text-muted">服务未单独设置超时时使用的上游请求超时（5–3600，默认 120）。</small>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">日志保留天数</label>
+            <input class="form-control" style="max-width:200px" type="number" min="1" max="365" @bind="usageLogRetentionDays" />
+            <small class="text-muted">调用日志保留天数（1–365，默认 30）。</small>
+        </div>
+        <div class="form-check form-switch mb-4">
+            <input class="form-check-input" type="checkbox" role="switch" id="rateLimitEnabled" @bind="rateLimitEnabled" />
+            <label class="form-check-label" for="rateLimitEnabled">启用速率限制</label>
+        </div>
+        <button class="btn btn-primary" @onclick="SaveTuning" disabled="@saving">
+            @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+        </button>
+    </div>
+</div>
+
+<div class="card mt-4" style="max-width:680px">
+    <div class="card-header">配置备份</div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            导出全部服务、模型与 API Key 为 JSON 文件（含上游密钥明文，请妥善保管）；
+            导入为增量合并：同名服务、相同 Key 值会跳过，不会覆盖现有配置。
+        </p>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <button class="btn btn-outline-primary" @onclick="ExportConfig" disabled="@exporting">
+                @if (exporting) { <span class="spinner-border spinner-border-sm"></span> } else { <text>导出配置</text> }
+            </button>
+            <label class="btn btn-outline-secondary mb-0">
+                导入配置
+                <InputFile OnChange="ImportConfig" accept=".json" style="display:none" />
+            </label>
+        </div>
+        @if (importMsg != null)
+        {
+            <div class="alert alert-info py-2 small mt-3 mb-0">@importMsg</div>
+        }
+    </div>
+</div>
+
+@code {
+    private string appName = "";
+    private string subtitle = "";
+    private string logoType = "auto";
+    private string logoEmoji = "";
+    private string logoImage = "";
+    private string listenHost = "";
+    private string listenPort = "";
+    private string adminToken = "";
+    private bool adminTokenSet;
+    private bool saving;
+    private bool saved;
+    private bool restarting;
+    private string? restartMsg;
+    private bool exporting;
+    private string? importMsg;
+    private bool probeEnabled;
+    private string probeIntervalS = "300";
+    private string lbEwmaAlpha = "";
+    private string breakerFailureThreshold = "";
+    private string breakerCooldownBaseS = "";
+    private string breaker429PenaltyMs = "";
+    private string breaker429WindowS = "";
+    private string inFlightPenaltyMs = "";
+    private string ewmaDecayS = "";
+    private string requestTimeoutDefaultS = "";
+    private string usageLogRetentionDays = "";
+    private bool rateLimitEnabled = true;
+
+    protected override void OnInitialized()
+    {
+        appName = Settings.AppName;
+        subtitle = Settings.Subtitle;
+        logoType = Settings.LogoType;
+        if (logoType == "emoji") logoEmoji = Settings.LogoValue;
+        if (logoType == "image") logoImage = Settings.LogoValue;
+        listenHost = Settings.ListenHost;
+        listenPort = Settings.ListenPort.ToString();
+        adminTokenSet = !string.IsNullOrEmpty(Settings.AdminToken);
+        probeEnabled = Settings.HealthProbeEnabled;
+        probeIntervalS = Settings.HealthProbeIntervalS.ToString();
+        lbEwmaAlpha = Settings.LbEwmaAlpha.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        breakerFailureThreshold = Settings.BreakerFailureThreshold.ToString();
+        breakerCooldownBaseS = Settings.BreakerCooldownBaseS.ToString();
+        breaker429PenaltyMs = Settings.Breaker429PenaltyMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        breaker429WindowS = Settings.Breaker429WindowS.ToString();
+        inFlightPenaltyMs = Settings.InFlightPenaltyMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ewmaDecayS = Settings.EwmaDecayS.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        requestTimeoutDefaultS = Settings.RequestTimeoutDefaultS.ToString();
+        usageLogRetentionDays = Settings.UsageLogRetentionDays.ToString();
+        rateLimitEnabled = Settings.RateLimitEnabled;
+    }
+
+    // Mirrors Program.IsLoopbackHost so the warning shows for 0.0.0.0 / + / IP.
+    private static bool IsLoopbackHost(string? host) =>
+        string.IsNullOrWhiteSpace(host)
+        || host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+        || host == "127.0.0.1" || host == "[::1]" || host == "::1";
+
+    private bool HostIsNonLoopback => !IsLoopbackHost(listenHost);
+
+    private static string ValidatePort(string? raw) =>
+        int.TryParse(raw, out var p) && p is > 0 and <= 65535
+            ? p.ToString()
+            : AppSettingsService.DefaultListenPort.ToString();
+
+    private string BrandInitials
+    {
+        get
+        {
+            var n = (appName ?? Settings.AppName)?.Trim() ?? "";
+            if (n.Length == 0) return "EG";
+            var words = n.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length >= 2 && char.IsAscii(words[0][0]) && char.IsAscii(words[1][0]))
+                return "" + char.ToUpperInvariant(words[0][0]) + char.ToUpperInvariant(words[1][0]);
+            return n[..Math.Min(2, n.Length)].ToUpperInvariant();
+        }
+    }
+
+    private async Task OnLogoFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > 200 * 1024)
+        {
+            Toasts.Error("图片过大，请选择 200KB 以内的图片。");
+            return;
+        }
+        await using var stream = file.OpenReadStream(200 * 1024);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        logoImage = $"data:{file.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    private async Task Save()
+    {
+        saving = true;
+        saved = false;
+        try
+        {
+            var logoValue = logoType switch
+            {
+                "emoji" => logoEmoji.Trim(),
+                "image" => logoImage,
+                _ => "",
+            };
+            var payload = new Dictionary<string, string>
+            {
+                [AppSettingsService.KeyAppName] = string.IsNullOrWhiteSpace(appName) ? AppSettingsService.DefaultAppName : appName.Trim(),
+                [AppSettingsService.KeySubtitle] = subtitle.Trim(),
+                [AppSettingsService.KeyLogoType] = logoType,
+                [AppSettingsService.KeyLogoValue] = logoValue,
+                [AppSettingsService.KeyListenHost] = string.IsNullOrWhiteSpace(listenHost) ? AppSettingsService.DefaultListenHost : listenHost.Trim(),
+                [AppSettingsService.KeyListenPort] = ValidatePort(listenPort),
+            };
+            // Blank token input = keep unchanged (use 清除令牌 to actually clear).
+            if (!string.IsNullOrWhiteSpace(adminToken))
+                payload[AppSettingsService.KeyAdminToken] = adminToken.Trim();
+            var resp = await Http.PutAsJsonAsync("/admin/settings", payload);
+            if (resp.IsSuccessStatusCode)
+            {
+                appName = Settings.AppName;
+                subtitle = Settings.Subtitle;
+                listenHost = Settings.ListenHost;
+                listenPort = Settings.ListenPort.ToString();
+                adminToken = "";
+                adminTokenSet = !string.IsNullOrEmpty(Settings.AdminToken);
+                saved = true;
+            }
+            else
+            {
+                Toasts.Error(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        finally { saving = false; }
+    }
+
+    // Restarts the whole application (new process). Desktop mode reopens the
+    // window with new settings; in a browser the circuit will drop — refresh.
+    private async Task Restart()
+    {
+        restarting = true;
+        restartMsg = null;
+        try
+        {
+            var resp = await Http.PostAsync("/admin/system/restart", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                restartMsg = "正在重启服务，请稍候（桌面模式会自动重开窗口；浏览器请手动刷新页面）…";
+            }
+            else
+            {
+                restartMsg = "重启失败：" + await resp.Content.ReadAsStringAsync();
+                restarting = false;
+            }
+        }
+        catch (Exception)
+        {
+            // The connection usually drops as the process exits — that's fine.
+            restartMsg = "重启请求已发出（连接中断属正常现象）。桌面模式会重开窗口；浏览器请手动刷新。";
+            restarting = false;
+        }
+    }
+
+    private async Task SaveProbe()
+    {
+        saving = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync("/admin/settings", new Dictionary<string, string>
+            {
+                [AppSettingsService.KeyHealthProbeEnabled] = probeEnabled ? "true" : "false",
+                [AppSettingsService.KeyHealthProbeIntervalS] =
+                    int.TryParse(probeIntervalS, out var s) && s is >= 30 and <= 86400 ? s.ToString() : "300",
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                probeIntervalS = Settings.HealthProbeIntervalS.ToString();
+                Toasts.Ok(probeEnabled ? "健康探测已开启" : "健康探测已关闭");
+            }
+            else
+            {
+                Toasts.Error(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        finally { saving = false; }
+    }
+
+    // Parses a numeric field; falls back to the default on any invalid input,
+    // mirroring AppSettingsService.GetD/GetI clamping. Invariant culture for doubles.
+    private static double ParseD(string raw, double fallback, double min, double max) =>
+        double.TryParse(raw, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= min && v <= max
+            ? v : fallback;
+
+    private static int ParseI(string raw, int fallback, int min, int max) =>
+        int.TryParse(raw, out var v) && v >= min && v <= max ? v : fallback;
+
+    private async Task SaveTuning()
+    {
+        saving = true;
+        try
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var resp = await Http.PutAsJsonAsync("/admin/settings", new Dictionary<string, string>
+            {
+                [AppSettingsService.KeyLbEwmaAlpha] = ParseD(lbEwmaAlpha, 0.3, 0.01, 1.0).ToString(inv),
+                [AppSettingsService.KeyBreakerFailureThreshold] = ParseI(breakerFailureThreshold, 3, 1, 100).ToString(),
+                [AppSettingsService.KeyBreakerCooldownBaseS] = ParseI(breakerCooldownBaseS, 10, 1, 3600).ToString(),
+                [AppSettingsService.KeyBreaker429PenaltyMs] = ParseD(breaker429PenaltyMs, 400.0, 0, 1_000_000).ToString(inv),
+                [AppSettingsService.KeyBreaker429WindowS] = ParseI(breaker429WindowS, 30, 1, 3600).ToString(),
+                [AppSettingsService.KeyInFlightPenaltyMs] = ParseD(inFlightPenaltyMs, 500.0, 0, 1_000_000).ToString(inv),
+                [AppSettingsService.KeyEwmaDecayS] = ParseD(ewmaDecayS, 4.0, 0.1, 3600).ToString(inv),
+                [AppSettingsService.KeyRequestTimeoutDefaultS] = ParseI(requestTimeoutDefaultS, 120, 5, 3600).ToString(),
+                [AppSettingsService.KeyRateLimitEnabled] = rateLimitEnabled ? "true" : "false",
+                [AppSettingsService.KeyUsageLogRetentionDays] = ParseI(usageLogRetentionDays, 30, 1, 365).ToString(),
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                lbEwmaAlpha = Settings.LbEwmaAlpha.ToString(inv);
+                breakerFailureThreshold = Settings.BreakerFailureThreshold.ToString();
+                breakerCooldownBaseS = Settings.BreakerCooldownBaseS.ToString();
+                breaker429PenaltyMs = Settings.Breaker429PenaltyMs.ToString(inv);
+                breaker429WindowS = Settings.Breaker429WindowS.ToString();
+                inFlightPenaltyMs = Settings.InFlightPenaltyMs.ToString(inv);
+                ewmaDecayS = Settings.EwmaDecayS.ToString(inv);
+                requestTimeoutDefaultS = Settings.RequestTimeoutDefaultS.ToString();
+                usageLogRetentionDays = Settings.UsageLogRetentionDays.ToString();
+                rateLimitEnabled = Settings.RateLimitEnabled;
+                Toasts.Ok("负载均衡 / 熔断设置已保存");
+            }
+            else
+            {
+                Toasts.Error(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        finally { saving = false; }
+    }
+
+    private async Task ClearToken()
+    {
+        saving = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync("/admin/settings", new Dictionary<string, string>
+            {
+                [AppSettingsService.KeyAdminToken] = "",
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                adminToken = "";
+                adminTokenSet = false;
+                saved = true;
+            }
+        }
+        finally { saving = false; }
+    }
+
+    private async Task ExportConfig()
+    {
+        exporting = true;
+        try
+        {
+            var json = await Http.GetStringAsync("/admin/export");
+            var fileName = $"yuswitch-config-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            // Trigger a browser download via a data URL (config JSON is small).
+            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json));
+            await JS.InvokeVoidAsync("eval",
+                $"(() => {{ const a = document.createElement('a'); a.href = 'data:application/json;base64,{b64}'; a.download = '{fileName}'; a.click(); }})()");
+            Toasts.Ok("配置已导出");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("导出失败：" + ex.Message);
+        }
+        finally { exporting = false; }
+    }
+
+    private async Task ImportConfig(InputFileChangeEventArgs e)
+    {
+        importMsg = null;
+        var file = e.File;
+        if (file is null) return;
+        if (file.Size > 5 * 1024 * 1024)
+        {
+            Toasts.Error("文件过大（>5MB），不是有效的配置导出文件。");
+            return;
+        }
+        try
+        {
+            await using var stream = file.OpenReadStream(5 * 1024 * 1024);
+            using var content = new StreamContent(stream);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            var resp = await Http.PostAsync("/admin/import", content);
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<ImportResult>();
+                importMsg = $"导入完成：服务 +{result?.services?.added ?? 0}（跳过 {result?.services?.skipped ?? 0}）· " +
+                            $"API Key +{result?.apiKeys?.added ?? 0}（跳过 {result?.apiKeys?.skipped ?? 0}）";
+                Toasts.Ok("配置已导入");
+            }
+            else
+            {
+                Toasts.Error("导入失败：" + await resp.Content.ReadAsStringAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("导入失败：" + ex.Message);
+        }
+    }
+
+    private class ImportResult
+    {
+        public ImportCount? services { get; set; }
+        public ImportCount? apiKeys { get; set; }
+    }
+    private class ImportCount { public int added { get; set; } public int skipped { get; set; } }
+
+    private async Task Reset()
+    {
+        appName = AppSettingsService.DefaultAppName;
+        subtitle = AppSettingsService.DefaultSubtitle;
+        logoType = "auto";
+        logoEmoji = "";
+        logoImage = "";
+        await Save();
+    }
+}

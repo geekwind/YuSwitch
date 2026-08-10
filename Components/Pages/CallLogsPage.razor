@@ -1,0 +1,313 @@
+@page "/logs"
+@inject HttpClient Http
+@inject RealtimeNotificationService Notifications
+@inject IHttpContextAccessor HttpContextAccessor
+@using YuSwitch.Services
+@implements IDisposable
+
+<PageTitle>调用日志</PageTitle>
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">调用日志</h1>
+        <p class="eg-sub">请求链路：模型别名 → 真实上游模型</p>
+    </div>
+    <div class="d-flex gap-3 align-items-center">
+        <RealtimeStatus />
+        <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" checked="@autoRefresh" @onchange="e => OnAutoRefreshChanged((bool)e.Value!)" id="autoRefreshSwitch">
+                <label class="form-check-label" for="autoRefreshSwitch">自动刷新</label>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@loading">
+                @if (loading) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
+            </button>
+        </div>
+    </div>
+</div>
+
+<UsageFilterBar ShowKeyword="true" ShowStatus="true" OnApply="OnFilter" />
+
+@if (loading)
+{
+    <p><span class="spinner-border spinner-border-sm"></span> 加载中...</p>
+}
+else if (loadError)
+{
+    <div class="alert alert-danger d-flex justify-content-between align-items-center">
+        <span>日志加载失败，请检查服务状态后重试。</span>
+        <button class="btn btn-sm btn-outline-danger" @onclick="LoadAsync">重试</button>
+    </div>
+}
+else if (logs is null || logs.Count == 0)
+{
+    <div class="alert alert-info">没有符合条件的调用记录。</div>
+}
+else
+{
+    <div class="eg-table-card">
+    <table class="table table-hover table-sm align-middle eg-logtable">
+        <thead>
+            <tr>
+                <th style="width:84px">时间</th>
+                <th>调用链路 (别名 → 真实模型)</th>
+                <th style="width:120px">服务</th>
+                <th style="width:56px">状态</th>
+                <th style="width:132px" class="text-end">Tokens (P/C/T)</th>
+                <th style="width:64px">缓存</th>
+                <th style="width:96px" class="text-end">延迟</th>
+                <th style="width:80px" class="text-end">首字</th>
+                <th style="width:48px"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var l in logs)
+            {
+                var expanded = expandedId == RowId(l);
+                <tr class="eg-logrow @(expanded ? "open" : "")" @onclick="() => Toggle(l)">
+                    <td><small>@l.timestamp?.Substring(11, 8)</small></td>
+                    <td>
+                        <span class="eg-chain">
+                            <code>@l.model</code>
+                            @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
+                            {
+                                <span class="eg-chain-arrow">→</span>
+                                <code class="eg-chain-up">@l.upstreamModel</code>
+                            }
+                        </span>
+                    </td>
+                    <td><small>@l.service</small></td>
+                    <td>
+                        @if (l.success) { <span class="badge bg-success">✓</span> }
+                        else { <span class="badge bg-danger">@l.statusCode</span> }
+                    </td>
+                    <td class="text-end"><small>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens) / @UiFormat.N(l.totalTokens)</small></td>
+                    <td>
+                        @if (l.cacheHit) { <span class="badge bg-info">命中</span> }
+                        else if (l.cacheCreationTokens > 0 || l.cacheReadTokens > 0) { <span class="badge bg-secondary">缓存</span> }
+                        else { <small class="text-muted">-</small> }
+                    </td>
+                    <td class="text-end"><small>@UiFormat.Ms(l.latencyMs)</small></td>
+                    <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.Ms(l.ttftMs) : "-")</small></td>
+                    <td class="text-muted text-center">@(expanded ? "▾" : "▸")</td>
+                </tr>
+                @if (expanded)
+                {
+                    <tr class="eg-logdetail">
+                        <td colspan="9">
+                            <div class="eg-detail-grid">
+                                <div>
+                                    <div class="eg-detail-label">Prompt</div>
+                                    <div class="eg-detail-box">@l.promptPreview</div>
+                                </div>
+                                <div>
+                                    <div class="eg-detail-label">Response</div>
+                                    <div class="eg-detail-box">@l.responsePreview</div>
+                                </div>
+                            </div>
+                            <div class="eg-detail-meta">
+                                <span><strong>Provider:</strong> @l.provider</span>
+                                @if (!string.IsNullOrEmpty(l.upstreamModel))
+                                { <span><strong>上游模型:</strong> @l.upstreamModel</span> }
+                                @if (l.reasoningTokens > 0)
+                                { <span><strong>推理 tokens:</strong> @UiFormat.N(l.reasoningTokens)</span> }
+                                @if (l.stream)
+                                { <span><strong>流式</strong></span> }
+                                @if (!string.IsNullOrEmpty(l.error))
+                                { <span class="text-danger"><strong>错误:</strong> @Trunc(l.error, 200)</span> }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-2">
+        <small class="text-muted">共 @total 条 · 第 @(page + 1)/@TotalPages 页</small>
+        <div class="btn-group">
+            <button class="btn btn-sm btn-outline-secondary" disabled="@(page == 0)" @onclick="PrevPage">上一页</button>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@(page + 1 >= TotalPages)" @onclick="NextPage">下一页</button>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CallLog>? logs;
+    private bool loading = true;
+    private bool loadError;
+    private int total;
+    private int page;
+    private const int PageSize = 100;
+    private int TotalPages => Math.Max(1, (total + PageSize - 1) / PageSize);
+    private string? expandedId;
+    private UsageFilterBar.FilterValues filter = new(24, "", "", "", "", "");
+    private bool autoRefresh = true;
+    private string? _circuitId;
+    private const string _pageKey = "logs";
+    private const string _userKey = "shared";  // single-user mode: all tabs share
+    private Action<Services.NotificationContext?>? _refreshCallback;
+    private Action<Services.SyncEvent>? _syncCallback;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Get Circuit ID for subscription
+        _circuitId = HttpContextAccessor?.HttpContext?.Connection.Id;
+
+        // Set up callback for notifications with smart filtering
+        _refreshCallback = (context) => InvokeAsync(async () =>
+        {
+            if (autoRefresh && ShouldRefresh(context))
+            {
+                await LoadAsync();
+            }
+        });
+
+        // Set up cross-tab sync callback
+        _syncCallback = (evt) => InvokeAsync(() =>
+        {
+            if (evt.Page == _pageKey)
+            {
+                if (evt.AutoRefresh.HasValue)
+                    autoRefresh = evt.AutoRefresh.Value;
+                StateHasChanged();
+            }
+        });
+
+        // Subscribe to new-log notifications and cross-tab sync
+        if (!string.IsNullOrEmpty(_circuitId))
+        {
+            Notifications.Subscribe(_circuitId, "new-log", _refreshCallback);
+            Notifications.RegisterUserConnection(_circuitId, _userKey);
+            Notifications.RegisterSyncCallback(_userKey, _syncCallback);
+        }
+
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Determine if the page should refresh based on the notification context.
+    /// Returns true if no filters are set, or if the notification matches the current filters.
+    /// </summary>
+    private bool ShouldRefresh(Services.NotificationContext? context)
+    {
+        // If no filters applied, always refresh
+        if (string.IsNullOrEmpty(filter.Model) && string.IsNullOrEmpty(filter.Service) && string.IsNullOrEmpty(filter.Provider))
+            return true;
+
+        // If context is null, refresh anyway to be safe
+        if (context is null)
+            return true;
+
+        // Check if notification matches current filters
+        bool matchesModel = string.IsNullOrEmpty(filter.Model) ||
+            context.Model?.Contains(filter.Model, StringComparison.OrdinalIgnoreCase) == true;
+
+        bool matchesService = string.IsNullOrEmpty(filter.Service) ||
+            context.Service?.Contains(filter.Service, StringComparison.OrdinalIgnoreCase) == true;
+
+        bool matchesProvider = string.IsNullOrEmpty(filter.Provider) ||
+            context.Provider?.Contains(filter.Provider, StringComparison.OrdinalIgnoreCase) == true;
+
+        return matchesModel && matchesService && matchesProvider;
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe when component is disposed
+        if (!string.IsNullOrEmpty(_circuitId))
+        {
+            Notifications.Unsubscribe(_circuitId, "new-log");
+            Notifications.UnsubscribeAll(_circuitId);
+        }
+    }
+
+    private async Task OnFilter(UsageFilterBar.FilterValues f)
+    {
+        filter = f; expandedId = null; page = 0; await LoadAsync();
+        // Sync auto-refresh state to other tabs
+        Notifications.BroadcastSync(_userKey, new Services.SyncEvent
+        {
+            EventType = "filter", Page = _pageKey, AutoRefresh = autoRefresh
+        });
+    }
+
+    private void OnAutoRefreshChanged(bool value)
+    {
+        autoRefresh = value;
+        // Sync auto-refresh toggle to other tabs
+        Notifications.BroadcastSync(_userKey, new Services.SyncEvent
+        {
+            EventType = "autoRefresh", Page = _pageKey, AutoRefresh = value
+        });
+    }
+
+    private static string RowId(CallLog l) => $"{l.timestamp}|{l.model}|{l.latencyMs}|{l.totalTokens}";
+
+    private void Toggle(CallLog l)
+    {
+        var id = RowId(l);
+        expandedId = expandedId == id ? null : id;
+    }
+
+    private async Task PrevPage() { if (page > 0) { page--; expandedId = null; await LoadAsync(); } }
+    private async Task NextPage() { if (page + 1 < TotalPages) { page++; expandedId = null; await LoadAsync(); } }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        loadError = false;
+        StateHasChanged();
+        var qs = $"?limit={PageSize}&offset={page * PageSize}&model={Uri.EscapeDataString(filter.Model)}" +
+                 $"&service={Uri.EscapeDataString(filter.Service)}&provider={Uri.EscapeDataString(filter.Provider)}" +
+                 $"&status={filter.Status}&q={Uri.EscapeDataString(filter.Keyword)}";
+        try
+        {
+            var result = await Http.GetFromJsonAsync<CallLogPage>("/admin/call-logs" + qs);
+            logs = result?.items ?? new();
+            total = result?.total ?? 0;
+        }
+        catch
+        {
+            // Distinguish "endpoint failed" from "genuinely no data" — silently
+            // showing 暂无数据 on errors hides real outages from the operator.
+            logs = new();
+            total = 0;
+            loadError = true;
+        }
+        loading = false;
+    }
+
+    private static string Trunc(string? s, int n) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s[..n] + "...");
+
+    private class CallLogPage
+    {
+        public int total { get; set; }
+        public List<CallLog>? items { get; set; }
+    }
+
+    private class CallLog
+    {
+        public string? timestamp { get; set; }
+        public string? model { get; set; }
+        public string? upstreamModel { get; set; }
+        public string? service { get; set; }
+        public string? provider { get; set; }
+        public bool success { get; set; }
+        public string? statusCode { get; set; }
+        public int promptTokens { get; set; }
+        public int completionTokens { get; set; }
+        public int totalTokens { get; set; }
+        public int reasoningTokens { get; set; }
+        public int cacheCreationTokens { get; set; }
+        public int cacheReadTokens { get; set; }
+        public bool cacheHit { get; set; }
+        public long latencyMs { get; set; }
+        public long ttftMs { get; set; }
+        public bool stream { get; set; }
+        public string? promptPreview { get; set; }
+        public string? responsePreview { get; set; }
+        public string? error { get; set; }
+    }
+}

@@ -1,0 +1,539 @@
+@page "/playground"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Forms
+
+<PageTitle>测试</PageTitle>
+
+<div class="eg-pagehead">
+    <div>
+        <h1 class="eg-title">接口测试</h1>
+        <p class="eg-sub">使用网关的 API Key 与上游模型进行对话测试</p>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <label class="form-label">API Key</label>
+        <input class="form-control font-monospace" value="@apiKey" @oninput="e => apiKey = e.Value!.ToString()!" placeholder="sk-..." />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">模型</label>
+        <input class="form-control" value="@model" @oninput="e => model = e.Value!.ToString()!" placeholder="GLM-4-Flash" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">协议</label>
+        <select class="form-select" value="@protocol" @onchange="e => protocol = e.Value!.ToString()!">
+            <option value="openai">OpenAI /v1/chat/completions</option>
+            <option value="anthropic">Anthropic /v1/messages</option>
+        </select>
+    </div>
+    <div class="col-md-1">
+        <label class="form-label">Max Tokens</label>
+        <input type="number" class="form-control" @bind="maxTokens" min="1" />
+    </div>
+    <div class="col-md-1 d-flex align-items-end">
+        <div class="form-check">
+            <input type="checkbox" id="stream" class="form-check-input" checked="@stream" @onchange="e => stream = (bool)e.Value!" />
+            <label class="form-check-label" for="stream">流式</label>
+        </div>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-primary w-100" @onclick="Send" disabled="@busy">
+            @if (busy) { <span class="spinner-border spinner-border-sm"></span> } else { <text>发送</text> }
+        </button>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-8">
+        <label class="form-label">系统提示（System Prompt，可选）</label>
+        <textarea class="form-control" rows="2" value="@systemPrompt" @oninput="e => systemPrompt = e.Value!.ToString()!" placeholder="设置模型角色/系统指令，留空则忽略"></textarea>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">温度</label>
+        <input type="number" class="form-control" @bind="temperature" min="0" max="2" step="0.1" />
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" @onclick="ClearConversation" disabled="@busy">清空对话</button>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="form-check mt-1">
+            <input type="checkbox" id="toolsToggle" class="form-check-input" checked="@enableTools" @onchange="e => enableTools = (bool)e.Value!" />
+            <label class="form-check-label" for="toolsToggle">启用函数调用（get_weather）</label>
+        </div>
+        <div class="text-muted small mt-1">请求会附带一个查询天气的工具定义。仅支持工具调用的模型可用。</div>
+    </div>
+    <div class="col-md-8">
+        <label class="form-label">图片（可选，仅附加到当前消息）</label>
+        <InputFile accept="image/*" OnChange="OnImageSelected" />
+        <div class="text-muted small mt-1">支持视觉输入的模型方可识别图片。</div>
+        @if (!string.IsNullOrEmpty(imageDataUrl))
+        {
+            <div class="mt-2 d-flex align-items-center gap-2">
+                <img src="@imageDataUrl" alt="图片预览" style="max-height:48px;max-width:48px;border-radius:4px;border:1px solid #dee2e6" />
+                <span class="text-muted small">@imageName</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearImage">移除</button>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">输入</label>
+    <textarea class="form-control" rows="3" value="@input" @oninput="e => input = e.Value!.ToString()!" placeholder="说点什么..."></textarea>
+</div>
+
+@if (!string.IsNullOrEmpty(reasoning))
+{
+    <details class="mb-2" open="@string.IsNullOrEmpty(response)">
+        <summary class="text-muted small" style="cursor:pointer">思考过程 (@reasoning.Length 字符)</summary>
+        <pre class="border rounded p-2 bg-light text-muted small mt-1" style="white-space:pre-wrap;max-height:240px;overflow-y:auto">@reasoning</pre>
+    </details>
+}
+
+@if (toolCalls.Count > 0)
+{
+    <div class="mb-2">
+        <label class="form-label">工具调用（tool calls）</label>
+        <pre class="border rounded p-2 bg-light small font-monospace" style="white-space:pre-wrap;max-height:240px;overflow-y:auto">@RenderToolCalls()</pre>
+    </div>
+}
+
+<div>
+    <label class="form-label">响应 @(string.IsNullOrEmpty(finishReason) ? "" : $"(finish: {finishReason})")</label>
+    <pre class="border rounded p-3 bg-light" style="min-height:120px;white-space:pre-wrap">@response</pre>
+    @if (done && string.IsNullOrEmpty(response) && toolCalls.Count == 0)
+    {
+        <div class="alert alert-warning py-2 small">
+            请求成功但没有正文输出。
+            @if (finishReason == "length" || !string.IsNullOrEmpty(reasoning))
+            {
+                <text>该模型是推理（thinking）模型，Max Tokens=@maxTokens 的配额被「思考过程」消耗完了——请调大 Max Tokens（建议 ≥1024）再试。</text>
+            }
+            else
+            {
+                <text>请检查调用日志中该请求的 finish_reason 与上游返回。</text>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string apiKey = "sk-yuswitch-local";
+    private string model = "GLM-4-Flash";
+    private string protocol = "openai";
+    private bool stream = true;
+    private int maxTokens = 1024;
+    private string input = "你好，请用一句话介绍你自己";
+    private string response = "";
+    private string reasoning = "";
+    private string finishReason = "";
+    private bool busy;
+    private bool done;
+
+    // 新增：系统提示 / 温度 / 多轮历史 / 工具调用 / 图片
+    private string systemPrompt = "";
+    private double? temperature = 1.0;
+    private bool enableTools;
+    private readonly List<Turn> history = new();
+    private readonly List<ToolCallInfo> toolCalls = new();
+    private string imageDataUrl = "";
+    private string imageB64 = "";
+    private string imageMime = "";
+    private string imageName = "";
+
+    private sealed class Turn
+    {
+        public string Role { get; init; } = "";
+        public string Text { get; init; } = "";
+    }
+
+    private sealed class ToolCallInfo
+    {
+        public string Name { get; set; } = "";
+        public string Arguments { get; set; } = "";
+    }
+
+    private async Task Send()
+    {
+        busy = true;
+        done = false;
+        response = "";
+        reasoning = "";
+        finishReason = "";
+        toolCalls.Clear();
+        try
+        {
+            // 用户消息先进入历史（本轮的图片只用于本次请求，不入历史）
+            history.Add(new Turn { Role = "user", Text = input });
+            if (protocol == "openai")
+                await SendOpenAI();
+            else
+                await SendAnthropic();
+            done = true;
+            // 成功后才把助手回复追加进历史
+            if (!string.IsNullOrEmpty(response))
+                history.Add(new Turn { Role = "assistant", Text = response });
+        }
+        catch (Exception ex)
+        {
+            // 失败时回滚刚追加的用户消息，避免历史中留下悬空 turn
+            if (history.Count > 0) history.RemoveAt(history.Count - 1);
+            response = "错误: " + ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SendOpenAI()
+    {
+        var messages = new List<object>();
+        if (!string.IsNullOrEmpty(systemPrompt))
+            messages.Add(new { role = "system", content = systemPrompt });
+        foreach (var t in history)
+            messages.Add(new { role = t.Role, content = t.Text });
+        messages.Add(new { role = "user", content = BuildUserContentOpenAI() });
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["stream"] = stream,
+            ["messages"] = messages,
+            ["max_tokens"] = maxTokens,
+        };
+        if (temperature.HasValue) payload["temperature"] = temperature.Value;
+        if (enableTools) payload["tools"] = ToolsOpenAI();
+
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions");
+        req.Headers.Add("Authorization", $"Bearer {apiKey}");
+        req.Content = JsonContent.Create(payload);
+
+        var resp = await Http.SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead);
+        if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {(int)resp.StatusCode}: " + await resp.Content.ReadAsStringAsync());
+
+        if (stream)
+        {
+            // OpenAI 流式 tool_calls 按 index 增量到达：名称只在首帧出现，arguments 逐帧拼接。
+            var toolCallMap = new Dictionary<int, ToolCallInfo>();
+            using var sr = new StreamReader(await resp.Content.ReadAsStreamAsync());
+            while (!sr.EndOfStream)
+            {
+                var line = await sr.ReadLineAsync();
+                if (line is null) break;
+                if (!line.StartsWith("data:")) continue;
+                var data = line[5..].Trim();
+                if (data == "[DONE]") break;
+                using var doc = System.Text.Json.JsonDocument.Parse(data);
+                if (!doc.RootElement.TryGetProperty("choices", out var choices)) continue;
+                if (choices.GetArrayLength() == 0) continue;
+                var choice = choices[0];
+                if (choice.TryGetProperty("finish_reason", out var fr) && fr.ValueKind == System.Text.Json.JsonValueKind.String)
+                    finishReason = fr.GetString() ?? "";
+                if (!choice.TryGetProperty("delta", out var delta)) continue;
+                var changed = false;
+                if (delta.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    reasoning += rc.GetString();
+                    changed = true;
+                }
+                if (delta.TryGetProperty("content", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    response += c.GetString();
+                    changed = true;
+                }
+                if (delta.TryGetProperty("tool_calls", out var tcs) && tcs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var tc in tcs.EnumerateArray())
+                    {
+                        var idx = tc.TryGetProperty("index", out var ip) && ip.ValueKind == System.Text.Json.JsonValueKind.Number ? ip.GetInt32() : 0;
+                        if (!toolCallMap.TryGetValue(idx, out var info))
+                        {
+                            info = new ToolCallInfo();
+                            toolCallMap[idx] = info;
+                        }
+                        if (tc.TryGetProperty("function", out var fn) && fn.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            if (fn.TryGetProperty("name", out var nm) && nm.ValueKind == System.Text.Json.JsonValueKind.String)
+                                info.Name += nm.GetString();
+                            if (fn.TryGetProperty("arguments", out var arg) && arg.ValueKind == System.Text.Json.JsonValueKind.String)
+                                info.Arguments += arg.GetString();
+                        }
+                    }
+                    changed = true;
+                }
+                if (changed) await InvokeAsync(StateHasChanged);
+            }
+            toolCalls.AddRange(toolCallMap.OrderBy(kv => kv.Key).Select(kv => kv.Value));
+        }
+        else
+        {
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var choice = doc.RootElement.GetProperty("choices")[0];
+            if (choice.TryGetProperty("finish_reason", out var fr) && fr.ValueKind == System.Text.Json.JsonValueKind.String)
+                finishReason = fr.GetString() ?? "";
+            var msg = choice.GetProperty("message");
+            if (msg.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == System.Text.Json.JsonValueKind.String)
+                reasoning = rc.GetString() ?? "";
+            if (msg.TryGetProperty("content", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String)
+                response = c.GetString() ?? "";
+            if (msg.TryGetProperty("tool_calls", out var tcs) && tcs.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var tc in tcs.EnumerateArray())
+                {
+                    var name = "";
+                    var args = "";
+                    if (tc.TryGetProperty("function", out var fn) && fn.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        if (fn.TryGetProperty("name", out var nm) && nm.ValueKind == System.Text.Json.JsonValueKind.String)
+                            name = nm.GetString() ?? "";
+                        if (fn.TryGetProperty("arguments", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.String)
+                            args = a.GetString() ?? "";
+                    }
+                    toolCalls.Add(new ToolCallInfo { Name = name, Arguments = args });
+                }
+            }
+        }
+    }
+
+    private async Task SendAnthropic()
+    {
+        var messages = new List<object>();
+        foreach (var t in history)
+            messages.Add(new { role = t.Role, content = t.Text });
+        messages.Add(new { role = "user", content = BuildUserContentAnthropic() });
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["stream"] = stream,
+            ["max_tokens"] = maxTokens,
+            ["messages"] = messages,
+        };
+        if (!string.IsNullOrEmpty(systemPrompt)) payload["system"] = systemPrompt;
+        if (temperature.HasValue) payload["temperature"] = temperature.Value;
+        if (enableTools) payload["tools"] = ToolsAnthropic();
+
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/messages");
+        req.Headers.Add("x-api-key", apiKey);
+        req.Content = JsonContent.Create(payload);
+
+        var resp = await Http.SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead);
+        if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {(int)resp.StatusCode}: " + await resp.Content.ReadAsStringAsync());
+
+        if (stream)
+        {
+            // Anthropic 流式工具调用 = content_block_start(tool_use) + input_json_delta 片段。
+            using var sr = new StreamReader(await resp.Content.ReadAsStreamAsync());
+            while (!sr.EndOfStream)
+            {
+                var line = await sr.ReadLineAsync();
+                if (line is null) break;
+                if (!line.StartsWith("data:")) continue;
+                var data = line[5..].Trim();
+                if (string.IsNullOrEmpty(data)) continue;
+                using var doc = System.Text.Json.JsonDocument.Parse(data);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var etype)) continue;
+                var evt = etype.GetString();
+                var changed = false;
+
+                if (evt == "content_block_start" &&
+                    root.TryGetProperty("content_block", out var cb) &&
+                    cb.TryGetProperty("type", out var cbt) && cbt.GetString() == "tool_use")
+                {
+                    toolCalls.Add(new ToolCallInfo
+                    {
+                        Name = cb.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                    });
+                    changed = true;
+                }
+                else if (evt == "content_block_delta" && root.TryGetProperty("delta", out var delta))
+                {
+                    if (delta.TryGetProperty("type", out var dt) && dt.GetString() == "input_json_delta" &&
+                        delta.TryGetProperty("partial_json", out var pj) &&
+                        pj.ValueKind == System.Text.Json.JsonValueKind.String &&
+                        toolCalls.Count > 0)
+                    {
+                        toolCalls[^1].Arguments += pj.GetString();
+                        changed = true;
+                    }
+                    if (delta.TryGetProperty("thinking", out var th) && th.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        reasoning += th.GetString();
+                        changed = true;
+                    }
+                    if (delta.TryGetProperty("text", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        response += t.GetString();
+                        changed = true;
+                    }
+                }
+                else if (evt == "message_delta" && root.TryGetProperty("delta", out var delta2))
+                {
+                    if (delta2.TryGetProperty("stop_reason", out var sr2) && sr2.ValueKind == System.Text.Json.JsonValueKind.String)
+                        finishReason = sr2.GetString() ?? "";
+                }
+
+                if (changed) await InvokeAsync(StateHasChanged);
+            }
+        }
+        else
+        {
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("stop_reason", out var sr3) && sr3.ValueKind == System.Text.Json.JsonValueKind.String)
+                finishReason = sr3.GetString() ?? "";
+            if (root.TryGetProperty("content", out var content) && content.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var block in content.EnumerateArray())
+                {
+                    var type = block.TryGetProperty("type", out var bt) ? bt.GetString() : "text";
+                    if (type == "thinking" && block.TryGetProperty("thinking", out var th2))
+                        reasoning += th2.GetString();
+                    else if (type == "text" && block.TryGetProperty("text", out var tx))
+                        response += tx.GetString();
+                    else if (type == "tool_use" && block.TryGetProperty("name", out var nm2))
+                    {
+                        var args = block.TryGetProperty("input", out var inp) ? inp.GetRawText() : "{}";
+                        toolCalls.Add(new ToolCallInfo { Name = nm2.GetString() ?? "", Arguments = args });
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 图片 / 工具 / 渲染辅助 ---
+
+    private async Task OnImageSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        using var ms = new MemoryStream();
+        await file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024).CopyToAsync(ms);
+        var bytes = ms.ToArray();
+        imageB64 = Convert.ToBase64String(bytes);
+        imageMime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        imageName = file.Name;
+        imageDataUrl = $"data:{imageMime};base64,{imageB64}";
+    }
+
+    private void ClearImage()
+    {
+        imageDataUrl = "";
+        imageB64 = "";
+        imageMime = "";
+        imageName = "";
+    }
+
+    private void ClearConversation()
+    {
+        history.Clear();
+        toolCalls.Clear();
+        response = "";
+        reasoning = "";
+        finishReason = "";
+        done = false;
+    }
+
+    /// <summary>OpenAI 内容：无图时为纯字符串（保持原有路径），有图时为 text+image_url 数组。</summary>
+    private object BuildUserContentOpenAI()
+    {
+        if (string.IsNullOrEmpty(imageDataUrl))
+            return input;
+        var parts = new List<object>();
+        if (!string.IsNullOrEmpty(input))
+            parts.Add(new { type = "text", text = input });
+        parts.Add(new { type = "image_url", image_url = new { url = imageDataUrl } });
+        return parts;
+    }
+
+    /// <summary>Anthropic 内容：无图时为纯字符串，有图时为 text + image(base64) 内容块。</summary>
+    private object BuildUserContentAnthropic()
+    {
+        if (string.IsNullOrEmpty(imageDataUrl))
+            return input;
+        var blocks = new List<object>();
+        if (!string.IsNullOrEmpty(input))
+            blocks.Add(new { type = "text", text = input });
+        blocks.Add(new { type = "image", source = new { type = "base64", media_type = imageMime, data = imageB64 } });
+        return blocks;
+    }
+
+    /// <summary>OpenAI 格式的预设工具定义（function 声明）。</summary>
+    private static List<object> ToolsOpenAI() => new()
+    {
+        new
+        {
+            type = "function",
+            function = new
+            {
+                name = "get_weather",
+                description = "查询指定城市的当前天气",
+                parameters = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        location = new { type = "string", description = "城市名称，例如：北京、上海" },
+                    },
+                    required = new[] { "location" },
+                },
+            },
+        },
+    };
+
+    /// <summary>Anthropic 格式的预设工具定义（input_schema）。</summary>
+    private static List<object> ToolsAnthropic() => new()
+    {
+        new
+        {
+            name = "get_weather",
+            description = "查询指定城市的当前天气",
+            input_schema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    location = new { type = "string", description = "城市名称，例如：北京、上海" },
+                },
+                required = new[] { "location" },
+            },
+        },
+    };
+
+    private string RenderToolCalls()
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < toolCalls.Count; i++)
+        {
+            var tc = toolCalls[i];
+            sb.AppendLine($"// 调用 #{i + 1} · {tc.Name}");
+            sb.AppendLine(PrettyJson(tc.Arguments));
+            if (i < toolCalls.Count - 1) sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    private static string PrettyJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "{}";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+}

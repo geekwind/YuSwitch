@@ -1,0 +1,106 @@
+@inject RealtimeNotificationService Notifications
+@inject IHttpContextAccessor HttpContextAccessor
+@implements IDisposable
+
+<div class="eg-realtime-status d-flex gap-3 align-items-center text-muted small">
+    <!-- Connection Status -->
+    <span class="d-flex gap-1 align-items-center">
+        <span class="@ConnectionDotClass" style="width:8px;height:8px;border-radius:50%;"></span>
+        <span>@ConnectionText</span>
+    </span>
+
+    <!-- Last Update Time -->
+    @if (lastUpdate.HasValue)
+    {
+        <span>最后更新: @lastUpdate.Value.ToString("HH:mm:ss")</span>
+    }
+
+    <!-- Active Subscribers (for debugging) -->
+    @if (showSubscriberCount)
+    {
+        <span class="text-muted">(@subscriberCount 个订阅者)</span>
+    }
+</div>
+
+@code {
+    private string? _connectionId;
+    private bool _isConnected = false;
+    private DateTime? lastUpdate;
+    private int subscriberCount;
+    private bool showSubscriberCount = false;
+
+    private string ConnectionDotClass => _isConnected ? "bg-success" : "bg-secondary";
+    private string ConnectionText => _isConnected ? "已连接" : "已断开";
+
+    protected override void OnInitialized()
+    {
+        _connectionId = HttpContextAccessor?.HttpContext?.Connection.Id;
+        _isConnected = !string.IsNullOrEmpty(_connectionId);
+        UpdateSubscriberCount();
+
+        if (!string.IsNullOrEmpty(_connectionId))
+        {
+            // Subscribe to notifications to update the timestamp
+            Notifications.Subscribe(_connectionId, "new-log", _ => OnNotification());
+            Notifications.Subscribe(_connectionId, "service-state", _ => UpdateSubscriberCount());
+        }
+    }
+
+    private void OnNotification()
+    {
+        InvokeAsync(() =>
+        {
+            lastUpdate = DateTime.Now;
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// Call this to manually update the last refresh time
+    /// </summary>
+    public void RefreshTimestamp()
+    {
+        lastUpdate = DateTime.Now;
+        StateHasChanged();
+    }
+
+    private void UpdateSubscriberCount()
+    {
+        subscriberCount = Notifications.SubscriberCount("new-log");
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Update subscriber count periodically; stops on dispose so the
+            // loop doesn't keep a dead circuit alive.
+            try
+            {
+                while (_isConnected && !_disposeCts.IsCancellationRequested)
+                {
+                    await Task.Delay(5000, _disposeCts.Token);
+                    UpdateSubscriberCount();
+                    if (showSubscriberCount)
+                    {
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* disposed */ }
+        }
+    }
+
+    private readonly CancellationTokenSource _disposeCts = new();
+
+    public void Dispose()
+    {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+        if (!string.IsNullOrEmpty(_connectionId))
+        {
+            Notifications.Unsubscribe(_connectionId, "new-log");
+            Notifications.Unsubscribe(_connectionId, "service-state");
+        }
+    }
+}
