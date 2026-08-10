@@ -411,14 +411,23 @@ a, .btn-link {
     background: #f7f8fc;
 }
 
-/* 表格容器卡片化 */
+/* 表格容器卡片化。overflow 必须保持 visible：操作列的下拉菜单（如服务管理
+   「更多」）以 absolute 定位渲染在行内，overflow:hidden 会把最后几行的菜单
+   裁掉。圆角裁切改由下方四角单元格的 border-radius 完成。 */
 .eg-table-card {
     background: var(--eg-surface);
     border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-lg);
     box-shadow: var(--eg-shadow-sm);
-    overflow: hidden;
 }
+
+    .eg-table-card .table > thead > tr > th:first-child { border-top-left-radius: calc(var(--eg-radius-lg) - 1px); }
+
+    .eg-table-card .table > thead > tr > th:last-child { border-top-right-radius: calc(var(--eg-radius-lg) - 1px); }
+
+    .eg-table-card .table > tbody > tr:last-child > td:first-child { border-bottom-left-radius: calc(var(--eg-radius-lg) - 1px); }
+
+    .eg-table-card .table > tbody > tr:last-child > td:last-child { border-bottom-right-radius: calc(var(--eg-radius-lg) - 1px); }
 
 /* ---------- 按钮 ---------- */
 
