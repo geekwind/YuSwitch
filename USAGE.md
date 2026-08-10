@@ -136,9 +136,11 @@ YuSwitch --headless --urls "http://localhost:9090"
 YuSwitch --urls "http://localhost:9090" --Configuration:Path="config.json"
 ```
 
-### appsettings.json（可选）
+### 配置方式
 
-程序无需配置文件即可运行（使用默认值）。如需自定义，创建 `appsettings.json`：
+**日常配置全部通过设置界面完成**（监听地址/端口、负载均衡、熔断、健康探测、日志保留、Web 搜索 Key、Admin Token 等），持久化在 SQLite 中，无需编辑任何配置文件。发布包里也不附带配置文件。
+
+`appsettings.json` 仅作为高级场景的可选覆盖入口：如程序同目录存在，启动时会被读取（可覆盖 `Urls`、`Database:Path`、Serilog 日志级别等）。不创建该文件时程序使用默认值正常运行。
 
 ```json
 {

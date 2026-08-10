@@ -88,7 +88,7 @@ jobs:
           [ -z "$REF" ] && REF="latest"
           echo "VERSION=$REF" >> $GITHUB_OUTPUT
 
-      - name: Package (single binary + example config)
+      - name: Package (single binary)
         shell: bash
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
@@ -96,7 +96,8 @@ jobs:
           mkdir -p dist
           cd publish
           # The exe is truly single-file (wwwroot + scoped CSS embedded via the
-          # build manifest). Keep only the binary; ship appsettings as an example.
+          # build manifest). Keep only the binary — all configuration is done
+          # through the settings UI and persisted in the SQLite DB.
           if [ -f "YuSwitch.exe" ]; then
             cp YuSwitch.exe ../dist/
           elif [ -f "YuSwitch" ]; then
@@ -107,7 +108,6 @@ jobs:
             ls -la
             exit 1
           fi
-          cp appsettings.json ../dist/appsettings.example.json 2>/dev/null || true
           cd ../dist
           ARCHIVE="../YuSwitch-${{ matrix.rid }}-${VER}"
           if [ "${{ matrix.archive }}" = "zip" ]; then
