@@ -22,4 +22,9 @@ public static class UiFormat
 
     /// <summary>Latency in ms with thousands separator + unit.</summary>
     public static string Ms(long ms) => $"{ms.ToString("N0", CultureInfo.InvariantCulture)} ms";
+
+    /// <summary>Duration for table cells: &lt;1s → "850 ms", else seconds "12.7 s".</summary>
+    public static string Sec(long ms) => ms < 1000
+        ? $"{ms} ms"
+        : $"{ms / 1000.0:0.#} s";
 }

@@ -17,6 +17,63 @@
         border-bottom: none;
     }
 
+/* 调用链路：别名与真实模型各占一行，避免长模型名撑宽列 */
+.eg-chain-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    max-width: 100%;
+    min-width: 0;
+}
+
+    /* fixed 布局下列宽固定，超长模型名在行内截断而不是撑出列 */
+    .eg-chain-stack code {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.eg-chain-real {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 100%;
+    min-width: 0;
+}
+
+    .eg-chain-real .eg-chain-arrow {
+        flex: none;
+    }
+
+    .eg-chain-real code {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+/* Tokens：P/C 一行，合计一行 */
+.eg-tok {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.25;
+    max-width: 100%;
+}
+
+    .eg-tok > span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.eg-tok-total {
+    color: var(--eg-text-3);
+    font-size: 0.9em;
+}
+
+
 .eg-chain-up {
     background: var(--eg-info-soft);
     color: var(--eg-info) !important;

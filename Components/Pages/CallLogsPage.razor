@@ -53,10 +53,10 @@ else
                 <th>调用链路 (别名 → 真实模型)</th>
                 <th style="width:120px">服务</th>
                 <th style="width:56px">状态</th>
-                <th style="width:132px" class="text-end">Tokens (P/C/T)</th>
+                <th style="width:110px" class="text-end">Tokens (P/C·Σ)</th>
                 <th style="width:64px">缓存</th>
-                <th style="width:96px" class="text-end">延迟</th>
-                <th style="width:80px" class="text-end">首字</th>
+                <th style="width:76px" class="text-end">延迟</th>
+                <th style="width:76px" class="text-end">首字</th>
                 <th style="width:48px"></th>
             </tr>
         </thead>
@@ -67,12 +67,14 @@ else
                 <tr class="eg-logrow @(expanded ? "open" : "")" @onclick="() => Toggle(l)">
                     <td><small>@l.timestamp?.Substring(11, 8)</small></td>
                     <td>
-                        <span class="eg-chain">
+                        <span class="eg-chain eg-chain-stack">
                             <code>@l.model</code>
                             @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
                             {
-                                <span class="eg-chain-arrow">→</span>
-                                <code class="eg-chain-up">@l.upstreamModel</code>
+                                <span class="eg-chain-real">
+                                    <span class="eg-chain-arrow">→</span>
+                                    <code class="eg-chain-up">@l.upstreamModel</code>
+                                </span>
                             }
                         </span>
                     </td>
@@ -81,14 +83,17 @@ else
                         @if (l.success) { <span class="badge bg-success">✓</span> }
                         else { <span class="badge bg-danger">@l.statusCode</span> }
                     </td>
-                    <td class="text-end"><small>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens) / @UiFormat.N(l.totalTokens)</small></td>
+                    <td class="text-end"><small class="eg-tok">
+                        <span>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens)</span>
+                        <span class="eg-tok-total">Σ @UiFormat.N(l.totalTokens)</span>
+                    </small></td>
                     <td>
                         @if (l.cacheHit) { <span class="badge bg-info">命中</span> }
                         else if (l.cacheCreationTokens > 0 || l.cacheReadTokens > 0) { <span class="badge bg-secondary">缓存</span> }
                         else { <small class="text-muted">-</small> }
                     </td>
-                    <td class="text-end"><small>@UiFormat.Ms(l.latencyMs)</small></td>
-                    <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.Ms(l.ttftMs) : "-")</small></td>
+                    <td class="text-end"><small>@UiFormat.Sec(l.latencyMs)</small></td>
+                    <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.Sec(l.ttftMs) : "-")</small></td>
                     <td class="text-muted text-center">@(expanded ? "▾" : "▸")</td>
                 </tr>
                 @if (expanded)
