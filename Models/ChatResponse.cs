@@ -1,4 +1,3 @@
-using System.Runtime.Serialization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -57,7 +56,7 @@ public class Delta
     public List<ToolCall>? ToolCalls { get; set; }
 }
 
-public class Usage
+public class Usage : IJsonOnDeserialized
 {
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }
@@ -75,8 +74,7 @@ public class Usage
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? Extra { get; set; }
 
-    [OnDeserialized]
-    internal void OnDeserialized(StreamingContext _)
+    public void OnDeserialized()
     {
         if (Extra is null) return;
 

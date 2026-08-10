@@ -339,7 +339,7 @@ public static class AnthropicEndpoints
         // System prompt (string or array of text blocks) → system message.
         var sys = a.SystemText();
         if (!string.IsNullOrEmpty(sys))
-            req.Messages.Add(new ChatMessage { Role = "system", Content = sys });
+            req.Messages.Add(new ChatMessage { Role = "system", Content = sys, CacheControl = a.SystemCacheControl() });
 
         // Convert tools (Anthropic format → OpenAI format).
         if (a.Tools is { Count: > 0 })
@@ -389,6 +389,7 @@ public static class AnthropicEndpoints
                 var toolCalls = new List<ToolCall>();
                 var toolResults = new List<(string toolCallId, string content)>();
                 var imageParts = new List<ContentPart>();
+                string? textCacheControl = null;
 
                 foreach (var block in je.EnumerateArray())
                 {
@@ -397,6 +398,14 @@ public static class AnthropicEndpoints
                     {
                         case "text":
                             textParts.Add(block.TryGetProperty("text", out var txt) ? txt.GetString() ?? "" : "");
+                            // Preserve the Anthropic prompt-caching marker so the
+                            // prefix survives the gateway round-trip (Zhipu GLM
+                            // only caches blocks that carry cache_control).
+                            if (block.TryGetProperty("cache_control", out var bcc)
+                                && bcc.ValueKind == JsonValueKind.Object
+                                && bcc.TryGetProperty("type", out var bct)
+                                && bct.ValueKind == JsonValueKind.String)
+                                textCacheControl = bct.GetString();
                             break;
                         case "tool_use" when m.Role == "assistant":
                             // Convert to OpenAI tool_calls format.
@@ -458,6 +467,7 @@ public static class AnthropicEndpoints
                         Role = m.Role,
                         Content = string.Join('\n', textParts),
                         ToolCalls = toolCalls,
+                        CacheControl = textCacheControl,
                     });
                 }
                 // If user message had tool_results, emit each as a separate tool message.
@@ -469,7 +479,7 @@ public static class AnthropicEndpoints
                     }
                     // Also keep any text content from the same message as a user message.
                     if (textParts.Count > 0 && m.Role == "user")
-                        req.Messages.Add(new ChatMessage { Role = "user", Content = string.Join('\n', textParts) });
+                        req.Messages.Add(new ChatMessage { Role = "user", Content = string.Join('\n', textParts), CacheControl = textCacheControl });
                 }
                 // Normal text (possibly with images) message.
                 if (toolCalls.Count == 0 && toolResults.Count == 0)
@@ -482,16 +492,21 @@ public static class AnthropicEndpoints
                             .Select(t2 => new ContentPart { Type = "text", Text = t2 })
                             .Concat(imageParts)
                             .ToList();
+                        // Cache marker applies to the last text block (Anthropic
+                        // caches from that block onward), so stamp it there too.
+                        if (textCacheControl is not null && parts.Count > 0)
+                            parts[^1].CacheControl = textCacheControl;
                         req.Messages.Add(new ChatMessage
                         {
                             Role = m.Role,
                             Content = string.Join('\n', textParts),
                             Parts = parts,
+                            CacheControl = textCacheControl,
                         });
                     }
                     else
                     {
-                        req.Messages.Add(new ChatMessage { Role = m.Role, Content = string.Join('\n', textParts) });
+                        req.Messages.Add(new ChatMessage { Role = m.Role, Content = string.Join('\n', textParts), CacheControl = textCacheControl });
                     }
                 }
             }
@@ -645,6 +660,23 @@ public class AnthropicRequest
 
     /// <summary>Extract text from system (string or content-block array).</summary>
     public string SystemText() => ExtractText(System);
+
+    /// <summary>Cache-control type (e.g. "ephemeral") if any system content block
+    /// carries a cache_control marker, else null. Used so the gateway re-emits
+    /// the marker on the outbound Anthropic call — Zhipu GLM only caches blocks
+    /// explicitly marked with cache_control.</summary>
+    public string? SystemCacheControl()
+    {
+        if (System is not JsonElement je || je.ValueKind != JsonValueKind.Array) return null;
+        foreach (var b in je.EnumerateArray())
+        {
+            if (b.ValueKind == JsonValueKind.Object
+                && b.TryGetProperty("cache_control", out var cc) && cc.ValueKind == JsonValueKind.Object
+                && cc.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String)
+                return t.GetString();
+        }
+        return null;
+    }
 
     /// <summary>Robustly extract text from an Anthropic content field that may be
     /// a string, a string array, or an array of content blocks. Never throws.</summary>

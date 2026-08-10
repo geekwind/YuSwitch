@@ -237,10 +237,13 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                         {
                             PromptTokens = u.TryGetProperty("input_tokens", out var it) ? it.GetInt32() : 0,
                             CompletionTokens = u.TryGetProperty("output_tokens", out var ot) ? ot.GetInt32() : 0,
-                            // Carried from message_start — this chunk is the last
+                            // Real Anthropic carries cache stats in message_start
+                            // (captured above); Zhipu GLM puts them in
+                            // message_delta instead — read both, preferring
+                            // whichever is present. This chunk is the last
                             // usage-bearing one, so its values survive into the log.
-                            CacheCreationInputTokens = cacheCreationInputTokens,
-                            CacheReadInputTokens = cacheReadInputTokens,
+                            CacheCreationInputTokens = u.TryGetProperty("cache_creation_input_tokens", out var cc2) ? cc2.GetInt32() : cacheCreationInputTokens,
+                            CacheReadInputTokens = u.TryGetProperty("cache_read_input_tokens", out var cr2) ? cr2.GetInt32() : cacheReadInputTokens,
                         };
                         usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens;
                     }
@@ -285,6 +288,7 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
     {
         // Extract system message (Anthropic uses top-level system, not a message).
         var systemText = new StringBuilder();
+        string? systemCacheControl = null;
         var msgs = new List<object>();
         // OpenAI sends each tool result as its own role:"tool" message, but
         // Anthropic wants them merged into a single user turn of tool_result
@@ -305,6 +309,7 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                 FlushToolResults();
                 if (systemText.Length > 0) systemText.Append('\n');
                 systemText.Append(m.Content ?? "");
+                if (!string.IsNullOrEmpty(m.CacheControl)) systemCacheControl = m.CacheControl;
                 continue;
             }
 
@@ -350,7 +355,10 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                 continue;
             }
 
-            msgs.Add(new { role = m.Role, content = m.Content ?? "" });
+            if (!string.IsNullOrEmpty(m.CacheControl))
+                msgs.Add(new { role = m.Role, content = new List<object> { new { type = "text", text = m.Content ?? "", cache_control = new { type = m.CacheControl } } } });
+            else
+                msgs.Add(new { role = m.Role, content = m.Content ?? "" });
         }
         FlushToolResults();
 
@@ -361,7 +369,12 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
             ["max_tokens"] = req.MaxTokens ?? 1024,
             ["stream"] = stream,
         };
-        if (systemText.Length > 0) payload["system"] = systemText.ToString();
+        if (systemText.Length > 0)
+        {
+            payload["system"] = systemCacheControl is null
+                ? systemText.ToString()
+                : new List<object> { new { type = "text", text = systemText.ToString(), cache_control = new { type = systemCacheControl } } };
+        }
         if (req.Temperature.HasValue) payload["temperature"] = req.Temperature;
         if (req.TopP.HasValue) payload["top_p"] = req.TopP;
         if (req.TopK.HasValue) payload["top_k"] = req.TopK;
@@ -391,8 +404,13 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
         {
             foreach (var p in m.Parts)
             {
-                var block = PartToAnthropicBlock(p);
-                if (block is not null) blocks.Add(block);
+                if (p.Type == "text" && !string.IsNullOrEmpty(p.CacheControl) && !string.IsNullOrEmpty(p.Text))
+                    blocks.Add(new { type = "text", text = p.Text, cache_control = new { type = p.CacheControl } });
+                else
+                {
+                    var block = PartToAnthropicBlock(p);
+                    if (block is not null) blocks.Add(block);
+                }
             }
         }
         else if (!string.IsNullOrEmpty(m.Content))

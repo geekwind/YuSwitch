@@ -84,6 +84,11 @@ public class ChatMessage
     public List<ToolCall>? ToolCalls { get; set; }
     public string? ToolCallId { get; set; }
     public string? Name { get; set; }
+    /// <summary>Anthropic prompt-caching marker (e.g. "ephemeral") carried from
+    /// the inbound request. Emitted again on the outbound Anthropic call so the
+    /// upstream caches the prefix; ignored by OpenAI-compatible upstreams.</summary>
+    [JsonIgnore]
+    public string? CacheControl { get; set; }
 }
 
 /// <summary>
@@ -179,6 +184,10 @@ public class ContentPart
     public string? Text { get; set; }
     public ImageUrl? ImageUrl { get; set; }
     public InputAudio? InputAudio { get; set; }
+    /// <summary>Anthropic prompt-caching marker on this content block. Ignored
+    /// when serialized to OpenAI-compatible upstreams (unknown field).</summary>
+    [JsonIgnore]
+    public string? CacheControl { get; set; }
 }
 
 public class ImageUrl
