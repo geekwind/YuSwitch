@@ -58,6 +58,16 @@ public class ChatRequest
     /// <summary>Provider-specific headers to forward upstream.</summary>
     [JsonIgnore]
     public Dictionary<string, string> ExtraHeaders { get; set; } = new();
+
+    /// <summary>Gateway-side web search intent, populated by WebSearchService
+    /// before routing. Never serialized upstream.</summary>
+    [JsonIgnore]
+    public WebSearchIntent? WebSearch { get; set; }
+
+    /// <summary>Guard so web search enrichment runs at most once per request —
+    /// failover candidates reuse this same ChatRequest object.</summary>
+    [JsonIgnore]
+    public bool SearchHandled { get; set; }
 }
 
 [JsonConverter(typeof(ChatMessageJsonConverter))]
@@ -187,6 +197,22 @@ public class Tool
 {
     public string Type { get; set; } = "function";
     public FunctionDecl? Function { get; set; }
+    /// <summary>Additional fields (e.g. web_search's max_results) preserved
+    /// verbatim so they round-trip to upstreams that understand them.</summary>
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>Internal gateway web-search intent, set by WebSearchService before
+/// routing. Never serialized upstream (ChatRequest.WebSearch is [JsonIgnore]).</summary>
+public class WebSearchIntent
+{
+    /// <summary>Effective mode after enrichment: "inject" or "simulate".</summary>
+    public string Mode { get; set; } = "inject";
+    /// <summary>Max results to fetch (client-requested value or config default).</summary>
+    public int MaxResults { get; set; } = 5;
+    /// <summary>Resolved Tavily API key (service override or the global setting).</summary>
+    public string? ApiKey { get; set; }
 }
 
 public class FunctionDecl

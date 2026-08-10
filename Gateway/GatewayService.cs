@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using YuSwitch.Data.Entities;
 using YuSwitch.Models;
 using YuSwitch.Providers;
@@ -23,6 +24,7 @@ public class GatewayService
     private readonly ConfigService _config;
     private readonly UsageService _usage;
     private readonly AppSettingsService _settings;
+    private readonly WebSearchService _webSearch;
     private readonly ILogger<GatewayService> _log;
     private readonly RealtimeNotificationService? _notifications;
 
@@ -40,6 +42,10 @@ public class GatewayService
     // (still distributes overall, just not globally strict). Retained as the
     // tie-breaker when adaptive scores are exactly equal (e.g. cold start).
     private static readonly ConcurrentDictionary<string, int> _rrCounters = new();
+
+    // Last winning service per model|tier — the stickiness anchor. Reads/writes
+    // are racy-by-design (worst case: one extra switch), no lock needed.
+    private static readonly ConcurrentDictionary<string, int> _lastPicked = new();
 
     // Per-service runtime state (in-flight, EWMA latency, circuit breaker,
     // concurrency semaphore, QPS/QPM buckets) for adaptive load balancing.
@@ -94,6 +100,7 @@ public class GatewayService
         Soft429WindowMs: s.Breaker429WindowS * 1000,
         InFlightPenaltyMs: s.InFlightPenaltyMs,
         EwmaDecayS: s.EwmaDecayS,
+        StickyFactor: s.LbStickyFactor,
         RateLimitEnabled: s.RateLimitEnabled);
 
     private static void RecordTrace(string model, string? session, string serviceName, int priority, int weight, bool success)
@@ -106,11 +113,11 @@ public class GatewayService
     }
 
     public GatewayService(IProviderRegistry registry, ConfigService config,
-        UsageService usage, AppSettingsService settings, ILogger<GatewayService> log,
-        RealtimeNotificationService? notifications = null)
+        UsageService usage, AppSettingsService settings, WebSearchService webSearch,
+        ILogger<GatewayService> log, RealtimeNotificationService? notifications = null)
     {
-        _registry = registry; _config = config; _usage = usage; _settings = settings; _log = log;
-        _notifications = notifications;
+        _registry = registry; _config = config; _usage = usage; _settings = settings;
+        _webSearch = webSearch; _log = log; _notifications = notifications;
     }
 
     private LbConfig ReadLbConfig() => ReadLbConfigStatic(_settings);
@@ -121,6 +128,29 @@ public class GatewayService
         if (candidates.Count == 0)
             throw new ModelNotFoundException(req.Model);
 
+        // Gateway-side web search: enrich exactly once, based on the first
+        // (preferred) candidate's service config. Failover candidates reuse the
+        // already-enriched request, so the search runs once per client request.
+        if (!req.SearchHandled)
+        {
+            await _webSearch.EnrichAsync(req, candidates[0].Service, ct);
+            req.SearchHandled = true;
+        }
+
+        // simulate (non-streaming) does a two-round function call; streaming
+        // simulate already fell back to inject inside EnrichAsync.
+        if (req.WebSearch?.Mode == "simulate")
+            return await SimulateSearchAsync(req, apiKeyName, candidates, ct);
+
+        return await ChatOnceAsync(req, apiKeyName, candidates, ct);
+    }
+
+    private async Task<ChatResponse> ChatOnceAsync(ChatRequest req, string apiKeyName,
+        List<(ServiceEntity Service, ModelEntity Model)> candidates, CancellationToken ct)
+    {
+        // Key ResolveCandidates was called with — ApplyRedirect mutates req.Model
+        // per attempt, so capture it now for the sticky-anchor update on success.
+        var stickyModel = req.Model;
         Exception? lastErr = null;
         foreach (var (svc, model) in candidates)
         {
@@ -156,6 +186,7 @@ public class GatewayService
                 // Adaptive feedback: record latency into the EWMA and close the breaker.
                 st.ObserveSample(ElapsedMs(sw), ReadLbConfig());
                 st.OnSuccess();
+                _lastPicked[$"{stickyModel}|{svc.Priority}"] = svc.Id;   // sticky anchor
                 _usage.Record(BuildLog(svc, model, req, apiKeyName, resp.Usage, sw, true, 200, null,
                     responsePreview: preview));
                 // Notify service state change (breaker closed)
@@ -197,6 +228,62 @@ public class GatewayService
         throw lastErr ?? new ModelNotFoundException(req.Model);
     }
 
+    /// <summary>Two-round web search simulation. Round 1 lets the upstream model
+    /// decide to call the web_search function tool; when it does, the gateway
+    /// runs the search itself and feeds the results back in round 2. Any other
+    /// tool call (or no tool call) passes through untouched — the client
+    /// executes its own tools. Each round records its own usage log row.</summary>
+    private async Task<ChatResponse> SimulateSearchAsync(ChatRequest req, string apiKeyName,
+        List<(ServiceEntity Service, ModelEntity Model)> candidates, CancellationToken ct)
+    {
+        var round1 = await ChatOnceAsync(req, apiKeyName, candidates, ct);
+        var msg = round1.Choices.FirstOrDefault()?.Message;
+        if (msg?.ToolCalls is { Count: > 0 } calls &&
+            calls.All(c => c.Type == "function" && c.Function.Name == "web_search"))
+        {
+            var query = ParseQueryFromArgs(calls[0].Function.Arguments);
+            var intent = req.WebSearch;
+            if (!string.IsNullOrWhiteSpace(query) && intent is not null)
+            {
+                string results;
+                try
+                {
+                    results = await _webSearch.SearchAsync(query, intent.MaxResults, intent.ApiKey ?? "", ct);
+                }
+                catch (Exception ex)
+                {
+                    // Hand the failure to the model so it can explain to the
+                    // client instead of dying mid-conversation.
+                    results = $"[web search failed: {ex.Message}]";
+                }
+                // Echo the assistant tool_call, then the tool result, so the
+                // upstream sees a consistent function-calling conversation.
+                req.Messages.Add(new ChatMessage { Role = "assistant", Content = null, ToolCalls = calls });
+                req.Messages.Add(new ChatMessage { Role = "tool", ToolCallId = calls[0].Id, Content = results });
+                // ApplyRedirect rewrote req.Model to the upstream name in round 1;
+                // restore the client alias so round 2 resolves cleanly.
+                req.Model = req.ClientModel;
+                return await ChatOnceAsync(req, apiKeyName, candidates, ct);
+            }
+        }
+        return round1;
+    }
+
+    private static string ParseQueryFromArgs(string args)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(args) ? "{}" : args);
+            return doc.RootElement.TryGetProperty("query", out var q) && q.ValueKind == JsonValueKind.String
+                ? q.GetString() ?? ""
+                : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     public async IAsyncEnumerable<StreamChunk> StreamAsync(
         ChatRequest req, string apiKeyName, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -204,6 +291,17 @@ public class GatewayService
         if (candidates.Count == 0)
             throw new ModelNotFoundException(req.Model);
 
+        // Gateway-side web search, once per request (simulate falls back to
+        // inject inside EnrichAsync, so streaming never does two rounds).
+        if (!req.SearchHandled)
+        {
+            await _webSearch.EnrichAsync(req, candidates[0].Service, ct);
+            req.SearchHandled = true;
+        }
+
+        // Key ResolveCandidates was called with — ApplyRedirect mutates req.Model
+        // per attempt, so capture it now for the sticky-anchor update on success.
+        var stickyModel = req.Model;
         var sw = StopwatchStart();
         Exception? lastErr = null;
         var lb = ReadLbConfig();
@@ -249,6 +347,7 @@ public class GatewayService
                 var ttft0 = ElapsedMs(sw);
                 st.ObserveSample(ttft0, lb);
                 st.OnSuccess();
+                _lastPicked[$"{stickyModel}|{svc.Priority}"] = svc.Id;   // sticky anchor
                 // Notify service state change (breaker closed)
                 _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
                 break; // got a first chunk (or clean empty), use this provider
@@ -356,6 +455,9 @@ public class GatewayService
     ///    EWMA(latency/TTFT) × (in-flight+1) ÷ Weight and pick the minimum. A
     ///    busy/slow service scores worse and yields traffic to its peers — this
     ///    is what makes concurrent requests spread by live load, not just config.
+    ///    STICKY HYSTERESIS: the last service that succeeded for this model|tier
+    ///    keeps winning while its score ≤ best × LbStickyFactor, so healthy peers
+    ///    don't flap per request (flapping discards upstream prompt caches).
     ///    If a SessionId is given (explicit X-Session-Id header only — clients'
     ///    user/user_id no longer trigger this), the primary is instead pinned by
     ///    a stable hash (sticky session affinity) and bypasses scoring.
@@ -434,14 +536,29 @@ public class GatewayService
                 if (scores[i] < best - 1e-9) { best = scores[i]; bestIdxs.Clear(); bestIdxs.Add(i); }
                 else if (Math.Abs(scores[i] - best) <= 1e-9) bestIdxs.Add(i);
             }
-            int primaryIdx;
-            if (bestIdxs.Count == 1) primaryIdx = bestIdxs[0];
-            else
+            int primaryIdx = -1;
+            // --- STICKY: prefer the last service that SUCCEEDED for this model|tier
+            // as long as its score is within StickyFactor× of the best. Switching
+            // upstreams discards the provider-side prompt cache (slower TTFT, more
+            // cost for agent clients that resend the whole conversation), so we
+            // only move when the anchor is genuinely worse — slow, loaded, cooling
+            // (filtered out of `usable` above) or at capacity. 1.0 disables.
+            if (lb.StickyFactor > 1.0 && _lastPicked.TryGetValue($"{model}|{tier.Key}", out var lastId))
             {
-                // Exact tie (e.g. all cold at coldStart/weight): advance RR among the
-                // tied slots so a burst of identical scores rotates instead of pinning.
-                var n = _rrCounters.AddOrUpdate($"{model}|{tier.Key}", _ => 1, (_, old) => old + 1);
-                primaryIdx = bestIdxs[(n - 1) % bestIdxs.Count];
+                var anchorIdx = usable.FindIndex(c => c.Item1.Id == lastId);
+                if (anchorIdx >= 0 && scores[anchorIdx] <= best * lb.StickyFactor)
+                    primaryIdx = anchorIdx;
+            }
+            if (primaryIdx < 0)
+            {
+                if (bestIdxs.Count == 1) primaryIdx = bestIdxs[0];
+                else
+                {
+                    // Exact tie (e.g. all cold at coldStart/weight): advance RR among the
+                    // tied slots so a burst of identical scores rotates instead of pinning.
+                    var n = _rrCounters.AddOrUpdate($"{model}|{tier.Key}", _ => 1, (_, old) => old + 1);
+                    primaryIdx = bestIdxs[(n - 1) % bestIdxs.Count];
+                }
             }
 
             var primary = usable[primaryIdx];

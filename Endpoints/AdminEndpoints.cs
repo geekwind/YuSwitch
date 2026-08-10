@@ -190,6 +190,7 @@ public static class AdminEndpoints
         existing.LimitJson = svc.LimitJson;
         existing.ModelRedirectJson = svc.ModelRedirectJson;
         existing.ModelMapJson = svc.ModelMapJson;
+        existing.WebSearchJson = svc.WebSearchJson;
         existing.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
         await config.ReloadAsync();
@@ -252,6 +253,7 @@ public static class AdminEndpoints
             LimitJson = src.LimitJson,
             ModelRedirectJson = src.ModelRedirectJson,
             ModelMapJson = src.ModelMapJson,
+            WebSearchJson = src.WebSearchJson,
         };
         foreach (var m in src.Models)
         {
@@ -654,7 +656,7 @@ public static class AdminEndpoints
             services = services.Select(s => new
             {
                 s.ProviderType, s.Name, s.Enabled, s.ServerUrl, s.Weight, s.Priority,
-                s.CredentialsJson, s.LimitJson, s.ModelRedirectJson, s.ModelMapJson,
+                s.CredentialsJson, s.LimitJson, s.ModelRedirectJson, s.ModelMapJson, s.WebSearchJson,
                 models = s.Models.Select(m => new
                 {
                     m.ModelName, m.UpstreamModel, m.Aliases, m.Enabled,
@@ -700,6 +702,7 @@ public static class AdminEndpoints
                     LimitJson = GetStr(s, "limitJson", "{}"),
                     ModelRedirectJson = GetStr(s, "modelRedirectJson", "{}"),
                     ModelMapJson = GetStr(s, "modelMapJson", "{}"),
+                    WebSearchJson = GetStr(s, "webSearchJson", "{}"),
                 };
                 if (s.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
                 {
@@ -864,6 +867,9 @@ public static class AdminEndpoints
             // Never return the admin token itself — only a masked marker so the
             // UI can show "set/not set". SaveSettings skips masked values.
             [AppSettingsService.KeyAdminToken] = MaskSecret(settings.AdminToken),
+            // Gateway-side web search global key — masked like the admin token so
+            // the UI shows "set/not set" but never the plaintext.
+            [AppSettingsService.KeyWebSearchTavilyKey] = MaskSecret(settings.WebSearchTavilyKey),
             [AppSettingsService.KeyRequestTimeoutDefaultS] = settings.RequestTimeoutDefaultS.ToString(),
             [AppSettingsService.KeyHealthProbeEnabled] = settings.HealthProbeEnabled ? "true" : "false",
             [AppSettingsService.KeyHealthProbeIntervalS] = settings.HealthProbeIntervalS.ToString(),
@@ -875,6 +881,7 @@ public static class AdminEndpoints
             [AppSettingsService.KeyBreaker429WindowS] = settings.Breaker429WindowS.ToString(),
             [AppSettingsService.KeyInFlightPenaltyMs] = settings.InFlightPenaltyMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             [AppSettingsService.KeyEwmaDecayS] = settings.EwmaDecayS.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [AppSettingsService.KeyLbStickyFactor] = settings.LbStickyFactor.ToString(System.Globalization.CultureInfo.InvariantCulture),
             [AppSettingsService.KeyRateLimitEnabled] = settings.RateLimitEnabled ? "true" : "false",
             [AppSettingsService.KeyUsageLogRetentionDays] = settings.UsageLogRetentionDays.ToString(),
         }, AdminJsonOpts);
@@ -893,6 +900,7 @@ public static class AdminEndpoints
             AppSettingsService.KeyListenHost,
             AppSettingsService.KeyListenPort,
             AppSettingsService.KeyAdminToken,
+            AppSettingsService.KeyWebSearchTavilyKey,
             AppSettingsService.KeyRequestTimeoutDefaultS,
             AppSettingsService.KeyHealthProbeEnabled,
             AppSettingsService.KeyHealthProbeIntervalS,
@@ -904,14 +912,17 @@ public static class AdminEndpoints
             AppSettingsService.KeyBreaker429WindowS,
             AppSettingsService.KeyInFlightPenaltyMs,
             AppSettingsService.KeyEwmaDecayS,
+            AppSettingsService.KeyLbStickyFactor,
             AppSettingsService.KeyRateLimitEnabled,
             AppSettingsService.KeyUsageLogRetentionDays,
         })
             if (incoming.TryGetValue(key, out var v))
             {
-                // A masked admin-token value round-tripped from GetSettings means
-                // "unchanged" — don't overwrite the real token with the mask.
-                if (key == AppSettingsService.KeyAdminToken && LooksMasked(v ?? ""))
+                // A masked value round-tripped from GetSettings means "unchanged" —
+                // don't overwrite the real secret with the mask. Applies to the
+                // admin token and the global Tavily key.
+                if ((key == AppSettingsService.KeyAdminToken ||
+                     key == AppSettingsService.KeyWebSearchTavilyKey) && LooksMasked(v ?? ""))
                     continue;
                 await settings.SetAsync(key, v?.Trim() ?? "", ct);
             }

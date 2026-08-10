@@ -205,6 +205,38 @@ else
                                 </div>
                             }
                         </div>
+                        <div class="col-md-12">
+                            <hr class="my-2" />
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="fw-bold mb-1">联网搜索</h6>
+                            </div>
+                            <small class="text-muted">网关代上游执行 Tavily 联网搜索，把结果注入上下文（兼容所有上游）或模拟工具调用（需上游支持 function calling）。客户端可声明 <code>{type:"web_search"}</code> 工具触发，或打开「始终联网」对每个请求自动搜索。</small>
+                            <div class="d-flex flex-wrap gap-4 mt-2 align-items-end">
+                                <div class="form-check">
+                                    <InputCheckbox id="wsOn" @bind-Value="wsEnabled" />
+                                    <label class="form-check-label" for="wsOn">启用</label>
+                                </div>
+                                <div class="form-check" title="对每个请求自动搜索，客户端无需声明 web_search 工具">
+                                    <InputCheckbox id="wsAlways" @bind-Value="wsAlwaysSearch" />
+                                    <label class="form-check-label" for="wsAlways">始终联网</label>
+                                </div>
+                                <div style="min-width:210px">
+                                    <label class="form-label mb-0">模式</label>
+                                    <select class="form-select form-select-sm" @bind="wsMode">
+                                        <option value="inject">上下文注入（兼容所有上游）</option>
+                                        <option value="simulate">工具调用模拟（需 function calling）</option>
+                                    </select>
+                                </div>
+                                <div style="width:120px">
+                                    <label class="form-label mb-0">最大结果数</label>
+                                    <InputNumber class="form-control form-control-sm" @bind-Value="wsMaxResults" />
+                                </div>
+                                <div style="min-width:240px">
+                                    <label class="form-label mb-0">Tavily API Key</label>
+                                    <input class="form-control form-control-sm font-monospace" type="password" placeholder="留空=使用全局 key" @bind="wsApiKey" />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -328,13 +360,18 @@ else
     private ConfirmDialog? confirm;
     private string? modelError;
 
-    // Editor state for the 限额 / 模型重定向 / 模型映射 controls.
+    // Editor state for the 限额 / 模型重定向 / 模型映射 / 联网搜索 controls.
     private double? limitQps;
     private double? limitQpm;
     private double? limitConcurrency;
     private int? limitTimeoutSeconds;
     private List<MapRow> redirects = new();
     private List<MapRow> modelMap = new();
+    private bool wsEnabled;
+    private string wsMode = "inject";
+    private int? wsMaxResults;
+    private bool wsAlwaysSearch;
+    private string wsApiKey = "";
 
     // Serialize with PascalCase so ServiceEntity.GetLimit()/GetModelRedirects()/
     // GetModelMap() (which read with default, case-sensitive options) can parse
@@ -401,6 +438,12 @@ else
         limitTimeoutSeconds = lim.TimeoutSeconds == 0 ? null : lim.TimeoutSeconds;
         redirects = s.GetModelRedirects().Select(kv => new MapRow { Key = kv.Key, Value = kv.Value }).ToList();
         modelMap = s.GetModelMap().Select(kv => new MapRow { Key = kv.Key, Value = kv.Value }).ToList();
+        var ws = s.GetWebSearch();
+        wsEnabled = ws?.Enabled ?? false;
+        wsMode = ws?.Mode ?? "inject";
+        wsMaxResults = ws is { MaxResults: > 0 } ? ws.MaxResults : null;
+        wsAlwaysSearch = ws?.AlwaysSearch ?? false;
+        wsApiKey = ws?.ApiKey ?? "";
         fieldErrors.Clear();
         showEditor = true;
     }
@@ -446,6 +489,25 @@ else
                 .ToDictionary(g => g.Key, g => g.First().Value ?? "");
             editing.ModelMapJson = modelMapOut.Count > 0
                 ? System.Text.Json.JsonSerializer.Serialize(modelMapOut) : null!;
+
+            // Web search: when disabled, null the column so it's omitted from the
+            // payload (server keeps the "{}" default). When enabled, serialize the
+            // config with PascalCase to match WebSearchConfig's deserializer.
+            if (wsEnabled)
+            {
+                editing.WebSearchJson = System.Text.Json.JsonSerializer.Serialize(new WebSearchConfig
+                {
+                    Enabled = true,
+                    Mode = string.IsNullOrWhiteSpace(wsMode) ? "inject" : wsMode,
+                    MaxResults = wsMaxResults is >= 1 and <= 10 ? wsMaxResults.Value : 5,
+                    AlwaysSearch = wsAlwaysSearch,
+                    ApiKey = string.IsNullOrWhiteSpace(wsApiKey) ? null : wsApiKey.Trim(),
+                });
+            }
+            else
+            {
+                editing.WebSearchJson = null!;
+            }
 
             var resp = editing.Id == 0
                 ? await Http.PostAsJsonAsync("/admin/services", editing, SaveJsonOpts)
@@ -652,6 +714,11 @@ else
         limitTimeoutSeconds = null;
         redirects = new();
         modelMap = new();
+        wsEnabled = false;
+        wsMode = "inject";
+        wsMaxResults = null;
+        wsAlwaysSearch = false;
+        wsApiKey = "";
     }
 
     private void AddRedirect() => redirects.Add(new MapRow());

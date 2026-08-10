@@ -32,6 +32,7 @@ public class AppSettingsService
     public const string KeyBreaker429WindowS = "breaker_429_window_s";    // how long a 429 de-weights
     public const string KeyInFlightPenaltyMs = "lb_inflight_penalty_ms";  // additive score penalty per in-flight req
     public const string KeyEwmaDecayS = "lb_ewma_decay_s";                // EWMA time-decay τ to baseline
+    public const string KeyLbStickyFactor = "lb_sticky_factor";           // hysteresis: stay on last service unless score > best × factor
     public const string KeyRateLimitEnabled = "rl_enabled";               // master switch for LimitConfig
 
     // Default upstream request timeout when a service has no TimeoutSeconds set.
@@ -49,6 +50,10 @@ public class AppSettingsService
     // Usage-log retention — how many days of UsageLog rows to keep; the
     // UsageService background cleanup deletes anything older.
     public const string KeyUsageLogRetentionDays = "usage_log_retention_days";
+
+    // Gateway-side web search. Global Tavily API key used when a service's
+    // WebSearchConfig.ApiKey is empty.
+    public const string KeyWebSearchTavilyKey = "web_search_tavily_key";
 
     public const string DefaultAppName = "禹枢";
     public const string DefaultSubtitle = "AI 网关";
@@ -97,6 +102,10 @@ public class AppSettingsService
     public int Breaker429WindowS => GetI(KeyBreaker429WindowS, 30, 1, 3600);
     public double InFlightPenaltyMs => GetD(KeyInFlightPenaltyMs, 500.0, 0, 1_000_000);
     public double EwmaDecayS => GetD(KeyEwmaDecayS, 4.0, 0.1, 3600);
+    /// <summary>Sticky hysteresis: keep routing to the last-used service while its
+    /// score ≤ best × factor. Avoids per-request channel flapping that discards
+    /// upstream prompt caches. 1.0 = off (pure best-score + RR). Default 2.0.</summary>
+    public double LbStickyFactor => GetD(KeyLbStickyFactor, 2.0, 1.0, 100.0);
     public bool RateLimitEnabled => GetB(KeyRateLimitEnabled, true);
 
     /// <summary>Fallback upstream timeout (seconds) when a service's LimitConfig has none.</summary>
@@ -113,6 +122,10 @@ public class AppSettingsService
     /// <summary>How many days of usage logs to retain (1..365). Rows older than
     /// this are deleted by the UsageService hourly cleanup.</summary>
     public int UsageLogRetentionDays => GetI(KeyUsageLogRetentionDays, 30, 1, 365);
+
+    /// <summary>Global Tavily API key for gateway-side web search. Empty = the
+    /// gateway still strips web_search tools but performs no search.</summary>
+    public string WebSearchTavilyKey => Get(KeyWebSearchTavilyKey, "");
 
     private double GetD(string key, double fallback, double min, double max) =>
         double.TryParse(Get(key, ""), System.Globalization.NumberStyles.Float,

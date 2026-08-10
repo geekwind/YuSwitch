@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using YuSwitch.Gateway;
@@ -133,23 +134,39 @@ public static class ResponsesEndpoints
         }
 
         // Tools: Responses uses a FLAT function tool ({type,name,parameters,...});
-        // chat completions nests it under "function". Skip non-function tool
-        // types (web_search, local_shell, ...) — no upstream here can run them.
+        // chat completions nests it under "function". Non-function tool types
+        // are skipped EXCEPT web_search, which the gateway itself serves (see
+        // WebSearchService.EnrichAsync) — it's carried through so the request
+        // triggers the gateway-side search rather than being silently dropped.
         if (r.Tools is { Count: > 0 })
         {
-            var tools = r.Tools
-                .Where(t => t.Type is null or "function" && !string.IsNullOrEmpty(t.Name))
-                .Select(t => new Tool
+            var tools = new List<Tool>();
+            foreach (var t in r.Tools)
+            {
+                if (t.Type == "web_search")
                 {
-                    Type = "function",
-                    Function = new FunctionDecl
+                    tools.Add(new Tool
                     {
-                        Name = t.Name!,
-                        Description = t.Description,
-                        Parameters = t.Parameters,
-                        Strict = t.Strict ?? false,
-                    }
-                }).ToList();
+                        Type = "web_search",
+                        ExtensionData = t.ExtensionData, // keep max_results etc.
+                    });
+                    continue;
+                }
+                if (t.Type is null or "function" && !string.IsNullOrEmpty(t.Name))
+                {
+                    tools.Add(new Tool
+                    {
+                        Type = "function",
+                        Function = new FunctionDecl
+                        {
+                            Name = t.Name!,
+                            Description = t.Description,
+                            Parameters = t.Parameters,
+                            Strict = t.Strict ?? false,
+                        }
+                    });
+                }
+            }
             if (tools.Count > 0) req.Tools = tools;
         }
 
@@ -746,6 +763,10 @@ public class ResponsesTool
     public string? Description { get; set; }
     public JsonDocument? Parameters { get; set; }
     public bool? Strict { get; set; }
+    /// <summary>Additional fields (e.g. web_search's max_results) preserved for
+    /// the gateway-side web search handler.</summary>
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
 public class ResponsesReasoning

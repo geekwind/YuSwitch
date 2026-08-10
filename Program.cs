@@ -119,12 +119,22 @@ builder.Services.AddHttpClient("openai", c =>
     c.Timeout = Timeout.InfiniteTimeSpan;
 });
 
+// --- HTTP client for gateway-side web search (Tavily). Bounded timeout: the
+// search is an additive enrichment step, so it must not hang the request. ---
+builder.Services.AddHttpClient("tavily", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(15);
+});
+
 // --- CORS (open gateway: allow any origin for the API endpoints) ---
 builder.Services.AddCors(o => o.AddPolicy("Any", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 // --- Provider registry ---
 builder.Services.AddSingleton<IProviderRegistry, ProviderRegistry>();
 builder.Services.AddSingleton(sp => (ProviderRegistry)sp.GetRequiredService<IProviderRegistry>());
+
+// --- Gateway-side web search (Tavily) ---
+builder.Services.AddSingleton<WebSearchService>();
 
 // --- Gateway ---
 builder.Services.AddSingleton<GatewayService>();
@@ -218,6 +228,9 @@ using (var scope = app.Services.CreateScope())
     await AddColumnIfMissingAsync(db, "UsageLogs", "CacheCreationTokens", "INTEGER NOT NULL DEFAULT 0");
     await AddColumnIfMissingAsync(db, "UsageLogs", "CacheReadTokens", "INTEGER NOT NULL DEFAULT 0");
     await AddColumnIfMissingAsync(db, "UsageLogs", "CacheHit", "INTEGER NOT NULL DEFAULT 0");
+    // Per-service web search config column (idempotent; fresh DBs get it via
+    // the EF model, older DBs via ALTER).
+    await AddColumnIfMissingAsync(db, "Services", "WebSearchJson", "TEXT NOT NULL DEFAULT '{}'");
     var config = scope.ServiceProvider.GetRequiredService<ConfigService>();
     await config.ReloadAsync();
     var appSettings = scope.ServiceProvider.GetRequiredService<AppSettingsService>();

@@ -296,4 +296,5 @@ public readonly record struct LbConfig(
     int Soft429WindowMs,
     double InFlightPenaltyMs,     // additive score penalty per in-flight request
     double EwmaDecayS,            // EWMA time-decay τ back toward the cold-start baseline
+    double StickyFactor,          // keep last-used service unless score > best × factor (1.0 = off)
     bool RateLimitEnabled);

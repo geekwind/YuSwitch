@@ -132,6 +132,26 @@
 </div>
 
 <div class="card mt-4" style="max-width:680px">
+    <div class="card-header">联网搜索</div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">全局 Tavily API Key</label>
+            <div class="d-flex gap-2 align-items-start">
+                <input class="form-control font-monospace" style="max-width:420px" type="password"
+                       @bind="wsTavilyKey" placeholder="@(wsTavilyKeySet ? "已设置（留空保持不变）" : "未设置（留空则禁用网关侧联网搜索）")" />
+                @if (wsTavilyKeySet)
+                {
+                    <button class="btn btn-outline-secondary btn-sm mt-1" @onclick="ClearWsKey" disabled="@saving">清除</button>
+                }
+            </div>
+            <small class="text-muted">
+                网关侧联网搜索默认使用此 Key（Tavily）；服务可在「服务 → 编辑 → 联网搜索」里按服务覆盖。留空且服务未配置自己的 Key 时，<code>web_search</code> 工具会被剥离、不执行搜索。
+            </small>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4" style="max-width:680px">
     <div class="card-header">健康探测</div>
     <div class="card-body">
         <div class="form-check form-switch mb-2">
@@ -195,6 +215,11 @@
             <small class="text-muted">延迟回归基线的时间常数 τ（0.1–3600，默认 4）。</small>
         </div>
         <div class="mb-3">
+            <label class="form-label">渠道粘性系数</label>
+            <input class="form-control" style="max-width:200px" type="number" step="0.1" min="1" max="100" @bind="lbStickyFactor" />
+            <small class="text-muted">优先继续使用上次成功的渠道，除非其评分超过最优渠道的该倍数才切换（保留上游 prompt cache）。1 = 关闭粘性（1–100，默认 2）。</small>
+        </div>
+        <div class="mb-3">
             <label class="form-label">默认请求超时（秒）</label>
             <input class="form-control" style="max-width:200px" type="number" min="5" max="3600" @bind="requestTimeoutDefaultS" />
             <small class="text-muted">服务未单独设置超时时使用的上游请求超时（5–3600，默认 120）。</small>
@@ -247,6 +272,8 @@
     private string listenPort = "";
     private string adminToken = "";
     private bool adminTokenSet;
+    private string wsTavilyKey = "";
+    private bool wsTavilyKeySet;
     private bool saving;
     private bool saved;
     private bool restarting;
@@ -262,6 +289,7 @@
     private string breaker429WindowS = "";
     private string inFlightPenaltyMs = "";
     private string ewmaDecayS = "";
+    private string lbStickyFactor = "";
     private string requestTimeoutDefaultS = "";
     private string usageLogRetentionDays = "";
     private bool rateLimitEnabled = true;
@@ -276,6 +304,7 @@
         listenHost = Settings.ListenHost;
         listenPort = Settings.ListenPort.ToString();
         adminTokenSet = !string.IsNullOrEmpty(Settings.AdminToken);
+        wsTavilyKeySet = !string.IsNullOrEmpty(Settings.WebSearchTavilyKey);
         probeEnabled = Settings.HealthProbeEnabled;
         probeIntervalS = Settings.HealthProbeIntervalS.ToString();
         lbEwmaAlpha = Settings.LbEwmaAlpha.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -285,6 +314,7 @@
         breaker429WindowS = Settings.Breaker429WindowS.ToString();
         inFlightPenaltyMs = Settings.InFlightPenaltyMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
         ewmaDecayS = Settings.EwmaDecayS.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        lbStickyFactor = Settings.LbStickyFactor.ToString(System.Globalization.CultureInfo.InvariantCulture);
         requestTimeoutDefaultS = Settings.RequestTimeoutDefaultS.ToString();
         usageLogRetentionDays = Settings.UsageLogRetentionDays.ToString();
         rateLimitEnabled = Settings.RateLimitEnabled;
@@ -355,6 +385,9 @@
             // Blank token input = keep unchanged (use 清除令牌 to actually clear).
             if (!string.IsNullOrWhiteSpace(adminToken))
                 payload[AppSettingsService.KeyAdminToken] = adminToken.Trim();
+            // Blank Tavily key input = keep unchanged (use 清除联网搜索 Key to clear).
+            if (!string.IsNullOrWhiteSpace(wsTavilyKey))
+                payload[AppSettingsService.KeyWebSearchTavilyKey] = wsTavilyKey.Trim();
             var resp = await Http.PutAsJsonAsync("/admin/settings", payload);
             if (resp.IsSuccessStatusCode)
             {
@@ -364,6 +397,8 @@
                 listenPort = Settings.ListenPort.ToString();
                 adminToken = "";
                 adminTokenSet = !string.IsNullOrEmpty(Settings.AdminToken);
+                wsTavilyKey = "";
+                wsTavilyKeySet = !string.IsNullOrEmpty(Settings.WebSearchTavilyKey);
                 saved = true;
             }
             else
@@ -450,6 +485,7 @@
                 [AppSettingsService.KeyBreaker429WindowS] = ParseI(breaker429WindowS, 30, 1, 3600).ToString(),
                 [AppSettingsService.KeyInFlightPenaltyMs] = ParseD(inFlightPenaltyMs, 500.0, 0, 1_000_000).ToString(inv),
                 [AppSettingsService.KeyEwmaDecayS] = ParseD(ewmaDecayS, 4.0, 0.1, 3600).ToString(inv),
+                [AppSettingsService.KeyLbStickyFactor] = ParseD(lbStickyFactor, 2.0, 1.0, 100.0).ToString(inv),
                 [AppSettingsService.KeyRequestTimeoutDefaultS] = ParseI(requestTimeoutDefaultS, 120, 5, 3600).ToString(),
                 [AppSettingsService.KeyRateLimitEnabled] = rateLimitEnabled ? "true" : "false",
                 [AppSettingsService.KeyUsageLogRetentionDays] = ParseI(usageLogRetentionDays, 30, 1, 365).ToString(),
@@ -463,6 +499,7 @@
                 breaker429WindowS = Settings.Breaker429WindowS.ToString();
                 inFlightPenaltyMs = Settings.InFlightPenaltyMs.ToString(inv);
                 ewmaDecayS = Settings.EwmaDecayS.ToString(inv);
+                lbStickyFactor = Settings.LbStickyFactor.ToString(inv);
                 requestTimeoutDefaultS = Settings.RequestTimeoutDefaultS.ToString();
                 usageLogRetentionDays = Settings.UsageLogRetentionDays.ToString();
                 rateLimitEnabled = Settings.RateLimitEnabled;
@@ -489,6 +526,25 @@
             {
                 adminToken = "";
                 adminTokenSet = false;
+                saved = true;
+            }
+        }
+        finally { saving = false; }
+    }
+
+    private async Task ClearWsKey()
+    {
+        saving = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync("/admin/settings", new Dictionary<string, string>
+            {
+                [AppSettingsService.KeyWebSearchTavilyKey] = "",
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                wsTavilyKey = "";
+                wsTavilyKeySet = false;
                 saved = true;
             }
         }
