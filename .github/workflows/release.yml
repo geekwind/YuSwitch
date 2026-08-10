@@ -124,7 +124,11 @@ jobs:
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
           bash tools/make_macos_app.sh ./publish ./logo.png "$VER" "${{ matrix.rid }}" ./dist
-          ls -lh dist/YuSwitch-*.dmg
+          # Flatten the DMG to the workspace root: upload-artifact preserves the
+          # dist/ prefix, which would leave it nested under artifacts/dist/ and
+          # invisible to the release step's artifacts/*.dmg glob.
+          mv dist/YuSwitch-*.dmg ./
+          ls -lh YuSwitch-*.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -133,7 +137,7 @@ jobs:
           path: |
             YuSwitch-*.zip
             YuSwitch-*.tar.gz
-            dist/YuSwitch-*.dmg
+            YuSwitch-*.dmg
 
   release:
     needs: build
