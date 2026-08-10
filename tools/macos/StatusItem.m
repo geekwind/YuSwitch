@@ -19,14 +19,14 @@ static YSVoidCallback g_onOpenBrowser = NULL;
 static YSVoidCallback g_onQuit = NULL;
 
 void YSShowWindow(void *window) {
-    NSWindow *w = (NSWindow *)window;
+    NSWindow *w = (__bridge NSWindow *)window;
     if (!w) return;
     [w makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
 }
 
 void YSHideWindow(void *window) {
-    NSWindow *w = (NSWindow *)window;
+    NSWindow *w = (__bridge NSWindow *)window;
     if (!w) return;
     [w orderOut:nil];
 }
@@ -36,7 +36,7 @@ void YSHideWindow(void *window) {
 @end
 
 @implementation YSStatusTarget
-- (void)ysOpenAction:(id)sender { YSShowWindow(g_window); }
+- (void)ysOpenAction:(id)sender { YSShowWindow((__bridge void *)g_window); }
 - (void)ysBrowserAction:(id)sender { if (g_onOpenBrowser) g_onOpenBrowser(); }
 - (void)ysQuitAction:(id)sender { if (g_onQuit) g_onQuit(); }
 @end
@@ -45,7 +45,7 @@ void YSHideWindow(void *window) {
 // callbacks fire on the main (AppKit) thread and must stay valid for the app's
 // lifetime (the managed side keeps the underlying delegates rooted).
 void YSInstallStatusItem(void *window, YSVoidCallback onOpenBrowser, YSVoidCallback onQuit) {
-    g_window = (NSWindow *)window;
+    g_window = (__bridge NSWindow *)window;
     g_onOpenBrowser = onOpenBrowser;
     g_onQuit = onQuit;
 
