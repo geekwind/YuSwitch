@@ -53,7 +53,7 @@ YuSwitch（禹枢）是一个 .NET 8 的 AI 模型网关：统一接入、切换
 ## Git 规范
 
 - **分支**：单分支 `main`，无 PR 流程。直接 commit + push。
-- **提交信息**：Conventional Commits 格式，`type(scope): 英文描述`，首行 ≤ 72 字符。Claude 辅助的提交追加 `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` 结尾。
+- **提交信息**：Conventional Commits 格式，`type(scope): 英文描述`，首行 ≤ 72 字符。Claude 辅助的提交追加 `Co-Authored-By: tianwc <im.wucai@gmail.com>` 结尾。
   - `feat(ui):` / `feat(gateway):` / `fix(gateway):` / `style(ui):` / `docs:` / `refactor:` / `chore:`
 - **历史已经重置过一次**（初始提交 `4aca4c6` + 文档修正 `bb37c77`），不要再无谓强推；日常更新用普通 push。只有在用户明确要求时才 `git push --force`。
 - **`simpleone.db`、`bin/`、`obj/`、`publish*/`、`dist/`、`logs/`、`*.db`** 均已被 .gitignore 排除，属运行时产物，不入库。
