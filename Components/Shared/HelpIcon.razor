@@ -2,18 +2,21 @@
    复用 <Icon Name="help">；颜色/圆角/阴影全部走 --eg-* 变量，暗色自动适配。
    用法：<label>字段名 <HelpIcon Text="说明文字" /></label> *@
 
+@* 注意：HelpIcon 通常嵌在 <label> 里，而 <button> 是 labelable element——label 会把点击
+   合成转发给按钮。遮罩/气泡在 DOM 上是 label 后代，必须 preventDefault 阻断这次合成点击，
+   否则「点遮罩关闭 → label 又合成点击按钮重新打开」，气泡永远关不掉。 *@
 @if (_open)
 {
-    <div class="eg-help-backdrop" @onclick="Close" aria-hidden="true"></div>
+    <div class="eg-help-backdrop" @onclick="Close" @onclick:preventDefault @onclick:stopPropagation aria-hidden="true"></div>
 }
 <span class="eg-help">
-    <button type="button" class="eg-help-btn" @onclick="Toggle"
-            aria-label="查看说明" aria-expanded="@_open" title="@Text">
+    <button type="button" class="eg-help-btn" @onclick="Toggle" @onclick:stopPropagation
+            aria-label="查看说明" aria-expanded="@_open">
         <Icon Name="help" Size="14" />
     </button>
     @if (_open)
     {
-        <span class="eg-help-popover" role="tooltip">@Text</span>
+        <span class="eg-help-popover" role="tooltip" @onclick:preventDefault @onclick:stopPropagation>@Text</span>
     }
 </span>
 
