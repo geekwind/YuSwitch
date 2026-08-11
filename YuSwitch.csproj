@@ -11,7 +11,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Binary version (shown in /health + the admin sidebar). The release
          pipeline overrides this with the git tag via -p:Version=<tag>. -->
-    <Version>0.0.4</Version>
+    <Version>0.0.5</Version>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <!-- Allow restore/build of the windows TFM on non-Windows CI runners. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
