@@ -127,25 +127,25 @@ else
                         { <small class="text-muted">修改 Key 值会让使用旧值的客户端立即失效</small> }
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">允许模型 (逗号分隔, * 表示全部)</label>
+                        <label class="form-label">允许模型 (逗号分隔, * 表示全部) <HelpIcon Text="逗号分隔的模型名白名单，*=全部允许。客户端只能请求这些模型，其余返回 404。" /></label>
                         <input class="form-control" @bind="editing.AllowedModels" />
                     </div>
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label class="form-label">QPM 限制 (0 = 不限)</label>
+                            <label class="form-label">QPM 限制 (0 = 不限) <HelpIcon Text="该 Key 每分钟最大请求数，0=不限。突发上限=QPM/60（令牌桶）。" /></label>
                             <input class="form-control" type="number" min="0" @bind="editing.QpmLimit" />
                         </div>
                         <div class="col-6">
-                            <label class="form-label">每日请求配额 (0 = 不限)</label>
+                            <label class="form-label">每日请求配额 (0 = 不限) <HelpIcon Text="该 Key 每日请求上限，0=不限。按日累计、数据取自调用日志，重启不会重置。" /></label>
                             <input class="form-control" type="number" min="0" @bind="editing.DailyQuota" />
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">IP 白名单 (逗号分隔，支持 CIDR；留空 = 不限)</label>
+                        <label class="form-label">IP 白名单 (逗号分隔，支持 CIDR；留空 = 不限) <HelpIcon Text="逗号分隔的 IPv4 或 CIDR（如 192.168.1.0/24）。留空=不限。不支持 IPv6 CIDR。" /></label>
                         <input class="form-control font-monospace" placeholder="192.168.1.0/24, 10.0.0.5" @bind="editing.IpAllowlist" />
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">过期时间 (留空 = 永久)</label>
+                        <label class="form-label">过期时间 (留空 = 永久) <HelpIcon Text="Key 失效时间，留空=永久。过期后该 Key 返回 401。" /></label>
                         <input class="form-control" style="max-width:260px" type="datetime-local" @bind="editing.ExpiresAt" />
                     </div>
                     <div class="form-check">

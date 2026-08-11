@@ -28,13 +28,18 @@ public static class OpenAiEndpoints
     }
 
     private static async Task<IResult> HandleChatCompletion(
-        HttpContext ctx, [FromBody] JsonElement body,
-        GatewayService gw, ConfigService config, CancellationToken ct)
+        HttpContext ctx, GatewayService gw, ConfigService config, CancellationToken ct)
     {
+        // Read the raw body once: keep the bytes so the provider can forward
+        // them verbatim (or patch the model field) instead of re-serializing
+        // the typed ChatRequest — the fast path that avoids unknown-field loss
+        // and extra JSON passes on the hot path.
+        var rawBody = await ReadBodyAsync(ctx.Request.Body, ct);
         ChatRequest req;
         try
         {
-            req = body.Deserialize<ChatRequest>(JsonOpts) ?? new ChatRequest();
+            using var doc = JsonDocument.Parse(rawBody);
+            req = doc.RootElement.Deserialize<ChatRequest>(JsonOpts) ?? new ChatRequest();
         }
         catch (JsonException ex)
         {
@@ -42,6 +47,7 @@ public static class OpenAiEndpoints
             // (400), not as an unhandled 500 from the exception middleware.
             return Error(400, $"invalid request body: {ex.Message}", "invalid_request_error");
         }
+        req.OriginalPayload = rawBody;
         req.ClientModel = req.Model;
         // Sticky session engages ONLY on an explicit X-Session-Id header — a
         // client's `user` field no longer pins affinity (it defeated load
@@ -82,6 +88,10 @@ public static class OpenAiEndpoints
         try
         {
             var resp = await gw.ChatAsync(req, apiKeyName, ct);
+            // No model-alias rewrite happened → forward the upstream JSON bytes
+            // verbatim (zero re-serialization, unknown fields preserved).
+            if (resp.RawPayload is not null)
+                return Results.Bytes(resp.RawPayload, "application/json");
             return Results.Json(resp, JsonOpts);
         }
         catch (ModelNotFoundException ex)
@@ -219,6 +229,13 @@ public static class OpenAiEndpoints
         if (JsonBody(ex.UpstreamBody, out var json))
             return new StatusTextResult(json, "application/json", (int)ex.StatusCode);
         return Error((int)ex.StatusCode, ex.Message, "upstream_error");
+    }
+
+    private static async Task<byte[]> ReadBodyAsync(Stream body, CancellationToken ct)
+    {
+        using var ms = new MemoryStream();
+        await body.CopyToAsync(ms, ct);
+        return ms.ToArray();
     }
 
     private static bool JsonBody(string body, out string json)

@@ -119,11 +119,11 @@ else
                             <small class="text-muted">上游服务的 API Key。编辑时显示为掩码（如 sk-****abcd），保持不动即不修改；输入新值则覆盖</small>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">权重</label>
+                            <label class="form-label">权重 <HelpIcon Text="数值越大分到的流量越多（仅在相同优先级内）。打分公式：延迟÷权重+惩罚。0 视为 1；如需停用请关「启用」开关，不要填 0。" /></label>
                             <InputNumber class="form-control" @bind-Value="editing.Weight" />
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">优先级</label>
+                            <label class="form-label">优先级 <HelpIcon Text="数值越小越优先尝试。0=主用；数值越大=越靠后的备用，仅当所有更小数值的渠道都失败或熔断后才会启用。" /></label>
                             <InputNumber class="form-control" @bind-Value="editing.Priority" />
                         </div>
                         <div class="col-md-4 d-flex align-items-end">
@@ -138,25 +138,25 @@ else
                             <small class="text-muted">留空表示不限制。</small>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">QPS</label>
+                            <label class="form-label">QPS <HelpIcon Text="每秒令牌桶上限，0/留空=不限。仅在「设置→启用速率限制」开启时生效。" /></label>
                             <InputNumber class="form-control" @bind-Value="limitQps" />
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">QPM</label>
+                            <label class="form-label">QPM <HelpIcon Text="每分钟令牌桶上限，0/留空=不限。仅在「设置→启用速率限制」开启时生效。" /></label>
                             <InputNumber class="form-control" @bind-Value="limitQpm" />
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">并发</label>
+                            <label class="form-label">并发 <HelpIcon Text="最大同时进行中的请求数，0/留空=不限。达到上限的渠道会被跳过（不排队等待）。" /></label>
                             <InputNumber class="form-control" @bind-Value="limitConcurrency" />
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">超时秒</label>
+                            <label class="form-label">超时秒 <HelpIcon Text="上游单请求超时（秒），0/留空=用全局默认（设置里，默认 120）。非流式约束整次调用；流式只约束首个 token 的等待时间。" /></label>
                             <InputNumber class="form-control" @bind-Value="limitTimeoutSeconds" />
                         </div>
                         <div class="col-md-12">
                             <hr class="my-2" />
                             <div class="d-flex justify-content-between align-items-center">
-                                <h6 class="fw-bold mb-1">模型重定向</h6>
+                                <h6 class="fw-bold mb-1">模型重定向 <HelpIcon Text="改写发给上游的模型名：请求命中「来源模型」时替换为「目标模型」再发给上游。" /></h6>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="AddRedirect">+ 添加</button>
                             </div>
                             <small class="text-muted">来源模型 → 目标模型：请求模型名命中「来源模型」时改写为「目标模型」发送给上游。</small>
@@ -182,7 +182,7 @@ else
                         <div class="col-md-12">
                             <hr class="my-2" />
                             <div class="d-flex justify-content-between align-items-center">
-                                <h6 class="fw-bold mb-1">模型映射</h6>
+                                <h6 class="fw-bold mb-1">模型映射 <HelpIcon Text="把客户端请求的模型名映射到本服务实际模型名（外部名 → 内部名）。" /></h6>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="AddModelMap">+ 添加</button>
                             </div>
                             <small class="text-muted">外部名称 → 内部模型名：将客户端请求的模型名映射到本服务实际模型名。</small>
@@ -208,7 +208,7 @@ else
                         <div class="col-md-12">
                             <hr class="my-2" />
                             <div class="d-flex justify-content-between align-items-center">
-                                <h6 class="fw-bold mb-1">联网搜索</h6>
+                                <h6 class="fw-bold mb-1">联网搜索 <HelpIcon Text="网关代为执行 Tavily 搜索并注入上下文（兼容所有上游）或模拟工具调用（需上游支持 function calling）。客户端声明 web_search 工具触发，或开「始终联网」对每个请求自动搜索。" /></h6>
                             </div>
                             <small class="text-muted">网关代上游执行 Tavily 联网搜索，把结果注入上下文（兼容所有上游）或模拟工具调用（需上游支持 function calling）。客户端可声明 <code>{type:"web_search"}</code> 工具触发，或打开「始终联网」对每个请求自动搜索。</small>
                             <div class="d-flex flex-wrap gap-4 mt-2 align-items-end">

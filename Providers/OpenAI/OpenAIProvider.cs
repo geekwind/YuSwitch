@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using YuSwitch.Data.Entities;
 using YuSwitch.Models;
 
@@ -42,16 +43,20 @@ public class OpenAIProvider : IProvider, ISupportsTools, ISupportsVision,
     public async Task<ChatResponse> ChatAsync(ChatRequest request, CancellationToken ct = default)
     {
         _extraHeaders = request.ExtraHeaders;
-        var (req, payload) = BuildRequest(request, stream: false);
+        var (req, _) = BuildRequest(request, stream: false);
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        var body = await resp.Content.ReadAsStringAsync(ct);
+        var bodyBytes = await resp.Content.ReadAsByteArrayAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            throw new UpstreamException(resp.StatusCode, body);
+            throw new UpstreamException(resp.StatusCode, Encoding.UTF8.GetString(bodyBytes));
 
-        var chatResp = JsonSerializer.Deserialize<ChatResponse>(body, JsonOpts)
+        var chatResp = JsonSerializer.Deserialize<ChatResponse>(bodyBytes, JsonOpts)
             ?? throw new UpstreamException(resp.StatusCode, "empty response");
         if (!string.IsNullOrEmpty(request.ClientModel))
             chatResp.Model = request.ClientModel;
+        // No model-alias rewrite → the raw upstream bytes already carry the
+        // client-facing model name; let the endpoint forward them verbatim.
+        if (request.ClientModel == request.Model)
+            chatResp.RawPayload = bodyBytes;
         return chatResp;
     }
 
@@ -92,20 +97,57 @@ public class OpenAIProvider : IProvider, ISupportsTools, ISupportsVision,
             var data = line["data:".Length..].Trim();
             if (data == "[DONE]") yield break;
 
-            var chunk = JsonSerializer.Deserialize<StreamChunk>(data, JsonOpts);
-            if (chunk is null) continue;
+            if (request.ClientModel == request.Model)
+            {
+                // No-alias fast path: one JSON pass extracts exactly what the
+                // gateway consumes (usage for accounting, choices' delta for the
+                // call preview) and SseWriter writes the raw upstream bytes
+                // verbatim — no typed re-deserialization, id/created passthrough
+                // untouched so clients see the upstream line as-is.
+                var chunk = new StreamChunk { RawPayload = Encoding.UTF8.GetBytes(data) };
+                using (var doc = JsonDocument.Parse(data))
+                {
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+                        chunk.Usage = u.Deserialize<Usage>(JsonOpts);
+                    if (root.TryGetProperty("choices", out var cs) && cs.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var c in cs.EnumerateArray())
+                        {
+                            if (c.ValueKind != JsonValueKind.Object
+                                || !c.TryGetProperty("delta", out var delta)
+                                || delta.ValueKind != JsonValueKind.Object)
+                                continue;
+                            var sc = new StreamChoice();
+                            if (delta.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
+                                sc.Delta.Content = content.GetString();
+                            if (delta.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == JsonValueKind.String)
+                                sc.Delta.ReasoningContent = rc.GetString();
+                            chunk.Choices ??= new List<StreamChoice>();
+                            chunk.Choices.Add(sc);
+                        }
+                    }
+                }
+                yield return chunk;
+                continue;
+            }
+
+            // Alias path: a model rewrite happened, so re-deserialize the typed
+            // chunk to rewrite the model name and carry id/created forward.
+            var typed = JsonSerializer.Deserialize<StreamChunk>(data, JsonOpts);
+            if (typed is null) continue;
 
             // Carry id/created from first chunk to subsequent ones.
-            if (!string.IsNullOrEmpty(chunk.Id)) chunkId = chunk.Id;
-            else chunk.Id = chunkId;
-            if (chunk.Created != 0) created = chunk.Created;
-            else chunk.Created = created;
+            if (!string.IsNullOrEmpty(typed.Id)) chunkId = typed.Id;
+            else typed.Id = chunkId;
+            if (typed.Created != 0) created = typed.Created;
+            else typed.Created = created;
 
             // Echo client-facing model name.
             if (!string.IsNullOrEmpty(request.ClientModel))
-                chunk.Model = request.ClientModel;
+                typed.Model = request.ClientModel;
 
-            yield return chunk;
+            yield return typed;
         }
     }
 
@@ -150,16 +192,52 @@ public class OpenAIProvider : IProvider, ISupportsTools, ISupportsVision,
 
     // --- helpers ---
 
-    private (HttpRequestMessage req, string payload) BuildRequest(ChatRequest request, bool stream)
+    private (HttpRequestMessage req, byte[] payload) BuildRequest(ChatRequest request, bool stream)
     {
-        var payload = JsonSerializer.Serialize(request, JsonOpts);
+        var payload = BuildPayload(request, stream);
         var url = $"{_baseUrl}/chat/completions";
         var req = new HttpRequestMessage(HttpMethod.Post, url);
         SetHeaders(req);
-        req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        req.Content = new ByteArrayContent(payload);
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         if (stream)
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         return (req, payload);
+    }
+
+    /// <summary>Builds the outbound request body. Prefers the raw inbound bytes
+    /// (set by the endpoint) so upstreams receive the client's JSON untouched —
+    /// forward verbatim when nothing changed, patch the model/stream_options in
+    /// place when they did. Falls back to full typed re-serialization only when
+    /// the gateway mutated the body (web search inject) or no raw bytes exist.</summary>
+    private byte[] BuildPayload(ChatRequest request, bool stream)
+    {
+        if (request.OriginalPayload is null || request.WebSearch is not null)
+            return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request, JsonOpts));
+
+        // No alias + non-streaming: routing/redirect changed nothing in the body —
+        // send the client's bytes verbatim (zero JSON work on the hot path).
+        if (!stream && request.ClientModel == request.Model)
+            return request.OriginalPayload;
+
+        // Streaming forces stream_options.include_usage (accounting) and an alias
+        // rewrites the model name. Patch the ORIGINAL document so every other
+        // field (including unknown ones) passes through untouched.
+        var node = JsonNode.Parse(Encoding.UTF8.GetString(request.OriginalPayload));
+        if (node is null)   // literal JSON "null" body
+            return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request, JsonOpts));
+        node["model"] = request.Model;
+        if (stream)
+        {
+            if (node["stream_options"] is JsonObject so)
+                so["include_usage"] = true;
+            else
+                node["stream_options"] = new JsonObject { ["include_usage"] = true };
+        }
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms))
+            node.WriteTo(writer);
+        return ms.ToArray();
     }
 
     private void SetHeaders(HttpRequestMessage req)

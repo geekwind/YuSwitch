@@ -93,7 +93,7 @@ else
                         else { <small class="text-muted">-</small> }
                     </td>
                     <td class="text-end"><small>@UiFormat.Sec(l.latencyMs)</small></td>
-                    <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.Sec(l.ttftMs) : "-")</small></td>
+                    <td class="text-end"><small title="@(l.ttftMs > 0 ? "首字延迟(TTFT)" : (l.stream ? "流式但未记录到 TTFT" : "非流式请求,无首字延迟"))">@(l.ttftMs > 0 ? UiFormat.Sec(l.ttftMs) : "-")</small></td>
                     <td class="text-muted text-center">@(expanded ? "▾" : "▸")</td>
                 </tr>
                 @if (expanded)

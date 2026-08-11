@@ -19,16 +19,23 @@ public interface IProviderRegistry
     /// <summary>Registers a factory under a provider type name.</summary>
     void Register(string type, ProviderFactory factory);
 
+    /// <summary>Sets the factory used when no exact type is registered —
+    /// the OpenAI-compatible catch-all, so legacy/vendor-specific type names
+    /// (deepseek/zhipu/groq/upstream/paratera/...) never hard-fail at dispatch.</summary>
+    void SetDefaultFactory(ProviderFactory factory);
+
     /// <summary>Builds a provider instance for the given service config.</summary>
     IProvider Create(ServiceEntity service);
 
-    /// <summary>All registered provider type names.</summary>
+    /// <summary>User-facing provider type names for the admin dropdown
+    /// (openai/claude only — the protocol decisions that actually differ).</summary>
     IReadOnlyCollection<string> RegisteredTypes { get; }
 }
 
 public class ProviderRegistry : IProviderRegistry
 {
     private readonly Dictionary<string, ProviderFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
+    private ProviderFactory? _defaultFactory;
     private readonly IServiceProvider _sp;
 
     public ProviderRegistry(IServiceProvider sp) => _sp = sp;
@@ -36,14 +43,23 @@ public class ProviderRegistry : IProviderRegistry
     public void Register(string type, ProviderFactory factory) =>
         _factories[type] = factory;
 
+    public void SetDefaultFactory(ProviderFactory factory) =>
+        _defaultFactory = factory;
+
     public IProvider Create(ServiceEntity service)
     {
-        if (!_factories.TryGetValue(service.ProviderType, out var factory))
-            throw new InvalidOperationException(
-                $"No provider registered for type '{service.ProviderType}'. " +
-                $"Registered: {string.Join(", ", _factories.Keys)}");
-        return factory(service, _sp);
+        if (_factories.TryGetValue(service.ProviderType, out var factory))
+            return factory(service, _sp);
+        // No exact type (legacy/vendor label or typo) → OpenAI-compatible
+        // catch-all. This keeps every service dispatchable instead of 500ing
+        // on unknown type names.
+        if (_defaultFactory is not null)
+            return _defaultFactory(service, _sp);
+        throw new InvalidOperationException(
+            $"No provider registered for type '{service.ProviderType}'. " +
+            $"Registered: {string.Join(", ", _factories.Keys)}");
     }
 
-    public IReadOnlyCollection<string> RegisteredTypes => _factories.Keys;
+    public IReadOnlyCollection<string> RegisteredTypes =>
+        new[] { "openai", "claude" };
 }

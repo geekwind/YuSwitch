@@ -13,6 +13,12 @@ public class ChatResponse
     public string? SystemFingerprint { get; set; }
     public List<Choice> Choices { get; set; } = new();
     public Usage? Usage { get; set; }
+
+    /// <summary>Raw upstream response bytes, set only when they can be forwarded
+    /// verbatim (no model-alias rewrite). Lets the endpoint return the upstream
+    /// JSON untouched instead of re-serializing <see cref="ChatResponse"/>.</summary>
+    [JsonIgnore]
+    internal byte[]? RawPayload { get; set; }
 }
 
 public class Choice
@@ -39,6 +45,12 @@ public class StreamChunk
     public string Model { get; set; } = "";
     public List<StreamChoice>? Choices { get; set; }
     public Usage? Usage { get; set; }
+
+    /// <summary>Raw bytes of the upstream `data:` JSON payload, set only when the
+    /// chunk can be forwarded verbatim (no model-alias rewrite). Lets SseWriter
+    /// write the original bytes back instead of re-serializing the chunk.</summary>
+    [JsonIgnore]
+    internal ReadOnlyMemory<byte>? RawPayload { get; set; }
 }
 
 public class StreamChoice

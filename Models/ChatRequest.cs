@@ -68,6 +68,14 @@ public class ChatRequest
     /// failover candidates reuse this same ChatRequest object.</summary>
     [JsonIgnore]
     public bool SearchHandled { get; set; }
+
+    /// <summary>Raw inbound request body, set by the endpoint. Lets the OpenAI
+    /// provider forward the original bytes (patched only where needed) instead of
+    /// re-serializing the typed model — preserving unknown fields and cutting
+    /// JSON processing on the hot path. Cleared/ignored when the gateway mutates
+    /// the request body (web search inject).</summary>
+    [JsonIgnore]
+    internal byte[]? OriginalPayload { get; set; }
 }
 
 [JsonConverter(typeof(ChatMessageJsonConverter))]

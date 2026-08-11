@@ -345,7 +345,43 @@ a, .btn-link {
 /* 内联 SVG 图标基线对齐 */
 .eg-icon { vertical-align: -0.125em; flex: none; }
 
-@@keyframes eg-toast-in {
+/* ---------- 帮助图标 (?) 点击弹出说明 ---------- */
+.eg-help { position: relative; display: inline-flex; vertical-align: middle; margin-left: 0.25rem; }
+.eg-help-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--eg-text-3); line-height: 1;
+}
+.eg-help-btn:hover,
+.eg-help-btn:focus-visible { color: var(--eg-primary); outline: none; }
+.eg-help-btn:focus-visible { box-shadow: var(--eg-ring); border-radius: 50%; }
+/* 全屏透明遮罩：盖住 modal-content(~1055)、被气泡(1080)盖住。点击即关闭 */
+.eg-help-backdrop { position: fixed; inset: 0; z-index: 1079; }
+.eg-help-popover {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    margin-top: 6px; z-index: 1080;
+    width: max-content; max-width: min(260px, 80vw);
+    padding: 0.6rem 0.75rem;
+    background: var(--eg-surface); color: var(--eg-text-2);
+    border: 1px solid var(--eg-border); border-radius: var(--eg-radius);
+    box-shadow: var(--eg-shadow-lg);
+    font-size: 0.8rem; font-weight: 400; line-height: 1.5;
+    white-space: normal; text-align: left;
+    animation: eg-help-in 0.15s ease;
+}
+.eg-help-popover::before { /* 向上小箭头 */
+    content: ""; position: absolute; top: -5px; left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 8px; height: 8px; background: var(--eg-surface);
+    border-left: 1px solid var(--eg-border); border-top: 1px solid var(--eg-border);
+}
+@keyframes eg-help-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes eg-toast-in {
     from { opacity: 0; transform: translateY(-8px); }
     to { opacity: 1; transform: translateY(0); }
 }

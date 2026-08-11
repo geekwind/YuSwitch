@@ -246,24 +246,13 @@ builder.Services.AddScoped(sp =>
 
 var app = builder.Build();
 
-// Register provider factories now that registry exists.
+// Register provider factories now that registry exists. Only two protocol
+// families exist — OpenAI-compatible and Anthropic — so expose exactly two
+// types to the admin dropdown. Legacy/vendor labels (deepseek/zhipu/groq/
+// upstream/paratera/...) are NOT registered here: they all speak the OpenAI
+// protocol and fall through to the default factory below.
 var registry = app.Services.GetRequiredService<ProviderRegistry>();
 registry.Register("openai", (svc, sp) =>
-{
-    var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
-    return new OpenAIProvider(httpFactory.CreateClient("openai"), svc);
-});
-registry.Register("deepseek", (svc, sp) =>
-{
-    var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
-    return new OpenAIProvider(httpFactory.CreateClient("openai"), svc);
-});
-registry.Register("zhipu", (svc, sp) =>
-{
-    var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
-    return new OpenAIProvider(httpFactory.CreateClient("openai"), svc);
-});
-registry.Register("groq", (svc, sp) =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
     return new OpenAIProvider(httpFactory.CreateClient("openai"), svc);
@@ -273,13 +262,17 @@ registry.Register("claude", (svc, sp) =>
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
     return new ClaudeProvider(httpFactory.CreateClient("openai"), svc);
 });
+// "anthropic" is a hidden alias for "claude" — kept for DB compat so existing
+// anthropic-typed services stay on the Anthropic protocol (the OpenAI-compatible
+// default factory would be wrong for them).
 registry.Register("anthropic", (svc, sp) =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
     return new ClaudeProvider(httpFactory.CreateClient("openai"), svc);
 });
-// Generic "upstream" type for passthrough OpenAI-compatible services.
-registry.Register("upstream", (svc, sp) =>
+// OpenAI-compatible catch-all for any other/unknown type name. Never throws
+// "no provider registered" for legacy configs like deepseek/paratera.
+registry.SetDefaultFactory((svc, sp) =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
     return new OpenAIProvider(httpFactory.CreateClient("openai"), svc);

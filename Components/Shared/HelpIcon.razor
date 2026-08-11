@@ -1,0 +1,25 @@
+@* 点击「?」弹出说明气泡；外部点击关闭。纯 Blazor @onclick，无 JS 依赖。
+   复用 <Icon Name="help">；颜色/圆角/阴影全部走 --eg-* 变量，暗色自动适配。
+   用法：<label>字段名 <HelpIcon Text="说明文字" /></label> *@
+
+@if (_open)
+{
+    <div class="eg-help-backdrop" @onclick="Close" aria-hidden="true"></div>
+}
+<span class="eg-help">
+    <button type="button" class="eg-help-btn" @onclick="Toggle"
+            aria-label="查看说明" aria-expanded="@_open" title="@Text">
+        <Icon Name="help" Size="14" />
+    </button>
+    @if (_open)
+    {
+        <span class="eg-help-popover" role="tooltip">@Text</span>
+    }
+</span>
+
+@code {
+    [Parameter] public string Text { get; set; } = "";
+    private bool _open;
+    private void Toggle() => _open = !_open;
+    private void Close() => _open = false;
+}

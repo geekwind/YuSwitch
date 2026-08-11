@@ -27,8 +27,19 @@ public static class SseWriter
 
     public static async Task WriteChunkAsync(HttpResponse response, StreamChunk chunk, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(chunk, JsonOpts);
-        await response.WriteAsync($"data: {json}\n\n", ct);
+        // Raw passthrough: no model-alias rewrite happened, so write the upstream
+        // `data:` payload bytes back verbatim (no re-serialization).
+        if (chunk.RawPayload is { Length: > 0 } raw)
+        {
+            await response.WriteAsync("data: ", ct);
+            await response.Body.WriteAsync(raw, ct);
+            await response.WriteAsync("\n\n", ct);
+        }
+        else
+        {
+            var json = JsonSerializer.Serialize(chunk, JsonOpts);
+            await response.WriteAsync($"data: {json}\n\n", ct);
+        }
         await response.Body.FlushAsync(ct);
     }
 
