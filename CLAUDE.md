@@ -53,9 +53,10 @@ YuSwitch（禹枢）是一个 .NET 8 的 AI 模型网关：统一接入、切换
 ## Git 规范
 
 - **分支**：单分支 `main`，无 PR 流程。直接 commit + push。
+- **提交身份**：author 与 committer 必须都是 `tianwc <im.wucai@gmail.com>`（项目 git config 已设，勿用其他身份）。提交后检查 `git log --format='%an <%ae> %cn <%ce>'`，出现非 tianwc 身份即为错误。
 - **提交信息**：Conventional Commits 格式，`type(scope): 英文描述`，首行 ≤ 72 字符。Claude 辅助的提交追加 `Co-Authored-By: tianwc <im.wucai@gmail.com>` 结尾。
   - `feat(ui):` / `feat(gateway):` / `fix(gateway):` / `style(ui):` / `docs:` / `refactor:` / `chore:`
-- **历史已经重置过一次**（初始提交 `4aca4c6` + 文档修正 `bb37c77`），不要再无谓强推；日常更新用普通 push。只有在用户明确要求时才 `git push --force`。
+- **历史重写**：仅在用户明确要求时做，且用户授权后才能强推。流程：`git filter-branch -f --tag-name-filter cat`（`--env-filter` 改身份 / `--msg-filter` 改 message）→ 强推 dev+main+tags → 校验 GitHub release 完整（release 跟随 tag 名，同名 tag 强推后 target 自动更新、资产保留）→ 清理备份：删 `refs/original`、`git reflog expire --expire=now --all`、`git gc --prune=now`（用户偏好彻底清理、不留备份）。**不要无谓强推**；日常更新用普通 push。
 - **`simpleone.db`、`bin/`、`obj/`、`publish*/`、`dist/`、`logs/`、`*.db`** 均已被 .gitignore 排除，属运行时产物，不入库。
 
 ## 构建与运行
