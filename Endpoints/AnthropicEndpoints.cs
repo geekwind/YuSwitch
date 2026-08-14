@@ -61,6 +61,10 @@ public static class AnthropicEndpoints
         {
             return AnthropicError(404, ex.Message, "not_found_error");
         }
+        catch (ServiceCapacityException ex) when (!ctx.Response.HasStarted)
+        {
+            return AnthropicError(503, ex.Message, "overloaded_error");
+        }
         catch (UpstreamException ex) when (!ctx.Response.HasStarted)
         {
             return UpstreamErrorPassthrough(ex);
@@ -92,6 +96,10 @@ public static class AnthropicEndpoints
         {
             return AnthropicError(404, ex.Message, "not_found_error");
         }
+        catch (ServiceCapacityException ex)
+        {
+            return AnthropicError(503, ex.Message, "overloaded_error");
+        }
         catch (UpstreamException ex)
         {
             return UpstreamErrorPassthrough(ex);
@@ -102,14 +110,50 @@ public static class AnthropicEndpoints
         HttpContext ctx, GatewayService gw, ChatRequest chatReq,
         AnthropicRequest anthropicReq, string apiKeyName, CancellationToken ct)
     {
-        SseWriter.StartSse(ctx.Response);
-        var msgId = Guid.NewGuid().ToString();
+        // Materialize the first chunk BEFORE starting SSE, so pre-stream failures
+        // (unknown model, all services at capacity, upstream 4xx/5xx) get their
+        // real HTTP status instead of a 200 + SSE error event.
+        await using var iter = gw.StreamAsync(chatReq, apiKeyName, ct).GetAsyncEnumerator(ct);
+        bool hasFirst;
+        try
+        {
+            hasFirst = await iter.MoveNextAsync();
+        }
+        catch (ModelNotFoundException ex)
+        {
+            return AnthropicError(404, ex.Message, "not_found_error");
+        }
+        catch (ServiceCapacityException ex)
+        {
+            return AnthropicError(503, ex.Message, "overloaded_error");
+        }
+        catch (UpstreamException ex)
+        {
+            return UpstreamErrorPassthrough(ex);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Results.Empty;
+        }
 
-        // message_start — usage.input_tokens will be filled from first chunk.
+        // Anthropic content blocks require unique, monotonically increasing
+        // indices — SDKs accumulate content by index. One counter assigns
+        // thinking/text/tool_use blocks as they open.
+        int nextBlockIndex = 0;
+        int thinkingIdx = -1;   // open thinking block index, -1 = none
+        int textIdx = -1;       // open text block index
+        var toolBlockIdx = new Dictionary<int, int>();   // OpenAI tool_calls index → block index
+        string? finishReason = null;
         int inputTokens = 0;
         int outputTokens = 0;
 
-        // Emit message_start immediately (input_tokens updated in message_delta).
+        // The first chunk from a Claude upstream already carries input_tokens —
+        // put it in message_start like the real API does.
+        if (hasFirst && iter.Current.Usage is { } u0 && u0.PromptTokens > 0)
+            inputTokens = u0.PromptTokens;
+
+        await SseWriter.StartSseAsync(ctx.Response);
+        var msgId = "msg_" + Guid.NewGuid().ToString("N");
         var startPayload = new
         {
             type = "message_start",
@@ -122,141 +166,149 @@ public static class AnthropicEndpoints
                 content = Array.Empty<object>(),
                 stop_reason = (string?)null,
                 stop_sequence = (string?)null,
-                usage = new { input_tokens = 0, output_tokens = 0 },
+                usage = new { input_tokens = inputTokens, output_tokens = 0 },
             },
         };
         await WriteEventAsync(ctx.Response, "message_start", startPayload, ct);
 
-        var started = false;
-        string? finishReason = null;
-        // Track which tool_use content blocks have been started (index → started).
-        var toolBlocksStarted = new Dictionary<int, bool>();
-        // Thinking block for reasoning content (uses a high index to avoid clashes).
-        bool thinkingStarted = false;
-        const int thinkingBlockIndex = 99;
-        try
+        async Task CloseThinkingAsync()
         {
-            await foreach (var chunk in gw.StreamAsync(chatReq, apiKeyName, ct))
+            if (thinkingIdx < 0) return;
+            await WriteEventAsync(ctx.Response, "content_block_stop",
+                new { type = "content_block_stop", index = thinkingIdx }, ct);
+            thinkingIdx = -1;
+        }
+
+        async Task CloseTextAsync()
+        {
+            if (textIdx < 0) return;
+            await WriteEventAsync(ctx.Response, "content_block_stop",
+                new { type = "content_block_stop", index = textIdx }, ct);
+            textIdx = -1;
+        }
+
+        async Task ProcessChunkAsync(StreamChunk chunk)
+        {
+            if (chunk.Usage is { } u)
             {
-                // Capture usage from chunk (upstream sends it with include_usage).
-                if (chunk.Usage is { } u)
+                if (u.PromptTokens > 0) inputTokens = u.PromptTokens;
+                outputTokens = u.CompletionTokens > 0 ? u.CompletionTokens : outputTokens;
+            }
+
+            if (chunk.Choices is null || chunk.Choices.Count == 0) return;
+            var choice = chunk.Choices[0];
+            var delta = choice.Delta;
+
+            if (!string.IsNullOrEmpty(choice.FinishReason))
+                finishReason = choice.FinishReason;
+
+            // Reasoning (Claude thinking_delta or DeepSeek-style
+            // reasoning_content) → Anthropic "thinking" content block.
+            if (!string.IsNullOrEmpty(delta.ReasoningContent))
+            {
+                if (thinkingIdx < 0)
                 {
-                    if (u.PromptTokens > 0) inputTokens = u.PromptTokens;
-                    outputTokens = u.CompletionTokens > 0 ? u.CompletionTokens : outputTokens;
-                }
-
-                if (chunk.Choices is null || chunk.Choices.Count == 0) continue;
-                var choice = chunk.Choices[0];
-                var delta = choice.Delta;
-
-                // Track finish_reason for stop_reason mapping.
-                if (!string.IsNullOrEmpty(choice.FinishReason))
-                    finishReason = choice.FinishReason;
-
-                // Reasoning content (deepseek-reasoner / model-name-A etc.)
-                // → emit as Anthropic "thinking" content block so Claude Code
-                // clients see the reasoning process.
-                if (!string.IsNullOrEmpty(delta.ReasoningContent))
-                {
-                    if (!thinkingStarted)
-                    {
-                        await WriteEventAsync(ctx.Response, "content_block_start",
-                            new { type = "content_block_start", index = thinkingBlockIndex,
-                                  content_block = new { type = "thinking", thinking = "" } }, ct);
-                        thinkingStarted = true;
-                    }
-                    await WriteEventAsync(ctx.Response, "content_block_delta",
-                        new { type = "content_block_delta", index = thinkingBlockIndex,
-                              delta = new { type = "thinking_delta", thinking = delta.ReasoningContent } }, ct);
-                }
-
-                // Text content (the actual answer, separate from reasoning)
-                if (!started && !string.IsNullOrEmpty(delta.Content))
-                {
-                    // Close thinking block before text block starts.
-                    if (thinkingStarted)
-                    {
-                        await WriteEventAsync(ctx.Response, "content_block_stop",
-                            new { type = "content_block_stop", index = thinkingBlockIndex }, ct);
-                        thinkingStarted = false;
-                    }
+                    thinkingIdx = nextBlockIndex++;
                     await WriteEventAsync(ctx.Response, "content_block_start",
-                        new { type = "content_block_start", index = 0, content_block = new { type = "text", text = "" } }, ct);
-                    started = true;
+                        new { type = "content_block_start", index = thinkingIdx,
+                              content_block = new { type = "thinking", thinking = "" } }, ct);
                 }
+                await WriteEventAsync(ctx.Response, "content_block_delta",
+                    new { type = "content_block_delta", index = thinkingIdx,
+                          delta = new { type = "thinking_delta", thinking = delta.ReasoningContent } }, ct);
+            }
 
-                if (!string.IsNullOrEmpty(delta.Content))
+            // Claude-upstream thinking signature → signature_delta, so the client
+            // can echo a verifiable thinking block in later history.
+            if (!string.IsNullOrEmpty(delta.ThinkingSignature))
+            {
+                if (thinkingIdx < 0)
                 {
-                    await WriteEventAsync(ctx.Response, "content_block_delta",
-                        new { type = "content_block_delta", index = 0, delta = new { type = "text_delta", text = delta.Content } }, ct);
+                    thinkingIdx = nextBlockIndex++;
+                    await WriteEventAsync(ctx.Response, "content_block_start",
+                        new { type = "content_block_start", index = thinkingIdx,
+                              content_block = new { type = "thinking", thinking = "" } }, ct);
                 }
+                await WriteEventAsync(ctx.Response, "content_block_delta",
+                    new { type = "content_block_delta", index = thinkingIdx,
+                          delta = new { type = "signature_delta", signature = delta.ThinkingSignature } }, ct);
+            }
 
-                // Tool call deltas → Anthropic tool_use events.
-                // OpenAI streams tool_calls as deltas with index/id/function.name/arguments.
-                // Anthropic expects: content_block_start(tool_use) → input_json_delta → content_block_stop.
-                if (delta.ToolCalls is { Count: > 0 })
+            if (!string.IsNullOrEmpty(delta.Content))
+            {
+                if (textIdx < 0)
                 {
-                    // Close text block if open before starting tool_use block.
-                    if (started)
+                    await CloseThinkingAsync();
+                    textIdx = nextBlockIndex++;
+                    await WriteEventAsync(ctx.Response, "content_block_start",
+                        new { type = "content_block_start", index = textIdx,
+                              content_block = new { type = "text", text = "" } }, ct);
+                }
+                await WriteEventAsync(ctx.Response, "content_block_delta",
+                    new { type = "content_block_delta", index = textIdx,
+                          delta = new { type = "text_delta", text = delta.Content } }, ct);
+            }
+
+            // Tool call deltas → Anthropic tool_use events.
+            // OpenAI streams tool_calls as deltas with index/id/function.name/arguments.
+            // Anthropic expects: content_block_start(tool_use) → input_json_delta → content_block_stop.
+            if (delta.ToolCalls is { Count: > 0 })
+            {
+                await CloseThinkingAsync();
+                await CloseTextAsync();
+                foreach (var tc in delta.ToolCalls)
+                {
+                    // First delta for a tool call: send content_block_start.
+                    if (!toolBlockIdx.ContainsKey(tc.Index) &&
+                        (!string.IsNullOrEmpty(tc.Id) || !string.IsNullOrEmpty(tc.Function.Name)))
                     {
-                        await WriteEventAsync(ctx.Response, "content_block_stop",
-                            new { type = "content_block_stop", index = 0 }, ct);
-                        started = false;
+                        var bIdx = nextBlockIndex++;
+                        toolBlockIdx[tc.Index] = bIdx;
+                        await WriteEventAsync(ctx.Response, "content_block_start",
+                            new
+                            {
+                                type = "content_block_start",
+                                index = bIdx,
+                                content_block = new
+                                {
+                                    type = "tool_use",
+                                    id = tc.Id,
+                                    name = tc.Function.Name,
+                                    input = new { },
+                                },
+                            }, ct);
                     }
 
-                    foreach (var tc in delta.ToolCalls)
+                    // Arguments delta → input_json_delta.
+                    if (!string.IsNullOrEmpty(tc.Function.Arguments) &&
+                        toolBlockIdx.TryGetValue(tc.Index, out var argIdx))
                     {
-                        // First delta for a tool call: send content_block_start.
-                        if (!string.IsNullOrEmpty(tc.Id) || !string.IsNullOrEmpty(tc.Function.Name))
-                        {
-                            var blockIdx = tc.Index;
-                            await WriteEventAsync(ctx.Response, "content_block_start",
-                                new
-                                {
-                                    type = "content_block_start",
-                                    index = blockIdx,
-                                    content_block = new
-                                    {
-                                        type = "tool_use",
-                                        id = tc.Id,
-                                        name = tc.Function.Name,
-                                        input = new { },
-                                    },
-                                }, ct);
-                            toolBlocksStarted[blockIdx] = true;
-                        }
-
-                        // Arguments delta → input_json_delta.
-                        if (!string.IsNullOrEmpty(tc.Function.Arguments))
-                        {
-                            var blockIdx = tc.Index;
-                            await WriteEventAsync(ctx.Response, "content_block_delta",
-                                new
-                                {
-                                    type = "content_block_delta",
-                                    index = blockIdx,
-                                    delta = new { type = "input_json_delta", partial_json = tc.Function.Arguments },
-                                }, ct);
-                        }
+                        await WriteEventAsync(ctx.Response, "content_block_delta",
+                            new
+                            {
+                                type = "content_block_delta",
+                                index = argIdx,
+                                delta = new { type = "input_json_delta", partial_json = tc.Function.Arguments },
+                            }, ct);
                     }
                 }
             }
+        }
 
-            // Close any remaining thinking block.
-            if (thinkingStarted)
-                await WriteEventAsync(ctx.Response, "content_block_stop",
-                    new { type = "content_block_stop", index = thinkingBlockIndex }, ct);
+        try
+        {
+            if (hasFirst)
+                await ProcessChunkAsync(iter.Current);
+            while (await iter.MoveNextAsync())
+                await ProcessChunkAsync(iter.Current);
 
-            // Close any remaining text block.
-            if (started)
-                await WriteEventAsync(ctx.Response, "content_block_stop",
-                    new { type = "content_block_stop", index = 0 }, ct);
-
-            // Close any tool_use blocks that were started.
-            foreach (var kv in toolBlocksStarted)
+            await CloseThinkingAsync();
+            await CloseTextAsync();
+            // Close any tool_use blocks that were started (in block order).
+            foreach (var kv in toolBlockIdx.OrderBy(kv => kv.Value))
             {
                 await WriteEventAsync(ctx.Response, "content_block_stop",
-                    new { type = "content_block_stop", index = kv.Key }, ct);
+                    new { type = "content_block_stop", index = kv.Value }, ct);
             }
 
             // message_delta with usage and stop_reason — Claude Code relies on
@@ -312,10 +364,34 @@ public static class AnthropicEndpoints
     private static IResult HandleCountTokens([FromBody] JsonElement body)
     {
         var req = body.Deserialize<AnthropicRequest>(JsonOpts);
-        var totalChars = 0;
+        // Rough local estimator in quarter-token units: ~4 chars/token for ASCII,
+        // ~1 token per CJK char (chars/4 badly underestimates Chinese text, which
+        // misleads Claude Code's compaction threshold), plus per-message framing
+        // and the tool schemas.
+        long units = 0;
+        void AddText(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            foreach (var ch in s)
+                units += ch >= 0x2E80 ? 4 : 1;
+        }
         foreach (var m in req?.Messages ?? new())
-            totalChars += AnthropicRequest.ExtractText(m.Content).Length;
-        return Results.Json(new { input_tokens = Math.Max(1, totalChars / 4) });
+        {
+            AddText(AnthropicRequest.ExtractText(m.Content));
+            units += 4 * 4;   // role + framing ≈ 4 tokens per message
+        }
+        AddText(req?.SystemText());
+        if (req?.Tools is { Count: > 0 } tools)
+        {
+            foreach (var t in tools)
+            {
+                AddText(t.Name);
+                AddText(t.Description);
+                if (t.InputSchema is not null) AddText(t.InputSchema.RootElement.GetRawText());
+                units += 16 * 4;   // per-tool overhead
+            }
+        }
+        return Results.Json(new { input_tokens = Math.Max(1, units / 4) });
     }
 
     // --- Anthropic <-> Chat conversion ---
@@ -333,8 +409,14 @@ public static class AnthropicEndpoints
             MaxTokens = a.MaxTokens,
             Temperature = a.Temperature,
             TopP = a.TopP,
+            TopK = a.TopK,
             Stop = a.StopSequences,
         };
+
+        // Extended thinking request → unified reasoning config (a Claude-native
+        // upstream re-emits it as the thinking parameter).
+        if (a.Thinking is { } th && th.Type == "enabled")
+            req.Reasoning = new ReasoningConfig { Enabled = true, MaxThinkingTokens = th.BudgetTokens };
 
         // System prompt (string or array of text blocks) → system message.
         var sys = a.SystemText();
@@ -389,6 +471,7 @@ public static class AnthropicEndpoints
                 var toolCalls = new List<ToolCall>();
                 var toolResults = new List<(string toolCallId, string content)>();
                 var imageParts = new List<ContentPart>();
+                var thinkingBlocks = new List<ThinkingBlockInfo>();
                 string? textCacheControl = null;
 
                 foreach (var block in je.EnumerateArray())
@@ -406,6 +489,22 @@ public static class AnthropicEndpoints
                                 && bcc.TryGetProperty("type", out var bct)
                                 && bct.ValueKind == JsonValueKind.String)
                                 textCacheControl = bct.GetString();
+                            break;
+                        case "thinking" when m.Role == "assistant":
+                            // Preserve signed thinking blocks verbatim — a
+                            // Claude-native upstream rejects thinking+tool_use
+                            // turns whose thinking blocks were stripped.
+                            thinkingBlocks.Add(new ThinkingBlockInfo
+                            {
+                                Thinking = block.TryGetProperty("thinking", out var thText) ? thText.GetString() ?? "" : "",
+                                Signature = block.TryGetProperty("signature", out var thSig) ? thSig.GetString() : null,
+                            });
+                            break;
+                        case "redacted_thinking" when m.Role == "assistant":
+                            thinkingBlocks.Add(new ThinkingBlockInfo
+                            {
+                                RedactedData = block.TryGetProperty("data", out var rd) ? rd.GetString() : null,
+                            });
                             break;
                         case "tool_use" when m.Role == "assistant":
                             // Convert to OpenAI tool_calls format.
@@ -468,6 +567,7 @@ public static class AnthropicEndpoints
                         Content = string.Join('\n', textParts),
                         ToolCalls = toolCalls,
                         CacheControl = textCacheControl,
+                        ThinkingBlocks = thinkingBlocks.Count > 0 ? thinkingBlocks : null,
                     });
                 }
                 // If user message had tool_results, emit each as a separate tool message.
@@ -502,11 +602,18 @@ public static class AnthropicEndpoints
                             Content = string.Join('\n', textParts),
                             Parts = parts,
                             CacheControl = textCacheControl,
+                            ThinkingBlocks = thinkingBlocks.Count > 0 ? thinkingBlocks : null,
                         });
                     }
                     else
                     {
-                        req.Messages.Add(new ChatMessage { Role = m.Role, Content = string.Join('\n', textParts), CacheControl = textCacheControl });
+                        req.Messages.Add(new ChatMessage
+                        {
+                            Role = m.Role,
+                            Content = string.Join('\n', textParts),
+                            CacheControl = textCacheControl,
+                            ThinkingBlocks = thinkingBlocks.Count > 0 ? thinkingBlocks : null,
+                        });
                     }
                 }
             }
@@ -524,8 +631,20 @@ public static class AnthropicEndpoints
         var choice = resp.Choices.FirstOrDefault();
         var msg = choice?.Message;
 
-        // Build content blocks: text + tool_use (if the model called tools).
+        // Build content blocks: thinking first (Anthropic requires it ahead of
+        // text/tool_use), then text + tool_use (if the model called tools).
         var contentBlocks = new List<object>();
+        if (!string.IsNullOrEmpty(msg?.ReasoningContent))
+        {
+            // Carry the signature through when present so the block round-trips
+            // verifiably; signature-less reasoning (DeepSeek-style) is display-only.
+            if (!string.IsNullOrEmpty(msg!.ThinkingSignature))
+                contentBlocks.Add(new { type = "thinking", thinking = msg.ReasoningContent, signature = msg.ThinkingSignature });
+            else
+                contentBlocks.Add(new { type = "thinking", thinking = msg.ReasoningContent });
+        }
+        if (!string.IsNullOrEmpty(msg?.RedactedThinkingData))
+            contentBlocks.Add(new { type = "redacted_thinking", data = msg!.RedactedThinkingData });
         if (!string.IsNullOrEmpty(msg?.Content))
             contentBlocks.Add(new { type = "text", text = msg.Content });
 
@@ -648,8 +767,11 @@ public class AnthropicRequest
     public int? MaxTokens { get; set; }
     public float? Temperature { get; set; }
     public float? TopP { get; set; }
+    public int? TopK { get; set; }
     public bool? Stream { get; set; }
     public List<string>? StopSequences { get; set; }
+    /// <summary>Extended thinking config: {"type":"enabled","budget_tokens":N}.</summary>
+    public AnthropicThinking? Thinking { get; set; }
     /// <summary>Anthropic metadata.user_id. NOTE: no longer used for sticky
     /// session affinity — only an explicit X-Session-Id header pins a session
     /// (see OpenAi/Anthropic endpoints). Kept on the request model for
@@ -707,6 +829,13 @@ public class AnthropicRequest
 public class AnthropicMetadata
 {
     public string? UserId { get; set; }
+}
+
+/// <summary>Anthropic extended-thinking request config.</summary>
+public class AnthropicThinking
+{
+    public string Type { get; set; } = "";   // "enabled" | "disabled"
+    public int? BudgetTokens { get; set; }
 }
 
 public class AnthropicMessage

@@ -98,6 +98,10 @@ public static class OpenAiEndpoints
         {
             return Error(404, ex.Message, "invalid_request_error");
         }
+        catch (ServiceCapacityException ex)
+        {
+            return Error(503, ex.Message, "server_error");
+        }
         catch (UpstreamException ex)
         {
             return UpstreamErrorPassthrough(ex);
@@ -107,17 +111,44 @@ public static class OpenAiEndpoints
     private static async Task<IResult> StreamResponse(
         HttpContext ctx, GatewayService gw, ChatRequest req, string apiKeyName, CancellationToken ct)
     {
-        SseWriter.StartSse(ctx.Response);
+        // Materialize the first chunk BEFORE starting SSE, so pre-stream failures
+        // (unknown model, all services at capacity, upstream 4xx/5xx) get their
+        // real HTTP status instead of a 200 + SSE error event.
+        await using var iter = gw.StreamAsync(req, apiKeyName, ct).GetAsyncEnumerator(ct);
+        StreamChunk? first;
         try
         {
-            await foreach (var chunk in gw.StreamAsync(req, apiKeyName, ct))
-                await SseWriter.WriteChunkAsync(ctx.Response, chunk, ct);
-            await SseWriter.WriteDoneAsync(ctx.Response, ct);
-            return Results.Empty;
+            first = await iter.MoveNextAsync() ? iter.Current : null;
         }
         catch (ModelNotFoundException ex)
         {
-            await SseWriter.WriteErrorSafeAsync(ctx.Response, new StreamError("invalid_request_error", ex.Message), ct);
+            return Error(404, ex.Message, "invalid_request_error");
+        }
+        catch (ServiceCapacityException ex)
+        {
+            return Error(503, ex.Message, "server_error");
+        }
+        catch (UpstreamException ex)
+        {
+            return UpstreamErrorPassthrough(ex);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Results.Empty;
+        }
+        catch (Exception ex)
+        {
+            return Error(500, ex.Message, "server_error");
+        }
+
+        await SseWriter.StartSseAsync(ctx.Response);
+        try
+        {
+            if (first is not null)
+                await SseWriter.WriteChunkAsync(ctx.Response, first, ct);
+            while (await iter.MoveNextAsync())
+                await SseWriter.WriteChunkAsync(ctx.Response, iter.Current, ct);
+            await SseWriter.WriteDoneAsync(ctx.Response, ct);
             return Results.Empty;
         }
         catch (UpstreamException ex)
@@ -200,6 +231,10 @@ public static class OpenAiEndpoints
         catch (ModelNotFoundException ex)
         {
             return Error(404, ex.Message + " (embeddings requires a model flagged 支持Embeddings)", "invalid_request_error");
+        }
+        catch (ServiceCapacityException ex)
+        {
+            return Error(503, ex.Message, "server_error");
         }
         catch (UpstreamException ex)
         {

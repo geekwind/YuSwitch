@@ -39,6 +39,11 @@ public class AppSettingsService
     // The named HttpClient has no timeout of its own, so this is the only bound.
     public const string KeyRequestTimeoutDefaultS = "request_timeout_default_s";
 
+    // Max silence between two SSE chunks mid-stream before the gateway aborts the
+    // upstream read. Bounds "sent first chunk then stalled" upstreams; without it
+    // a stuck stream leaks its connection + in-flight slot forever.
+    public const string KeyStreamIdleTimeoutS = "stream_idle_timeout_s";
+
     // Admin token protecting /admin/*. Empty = loopback-only zero-friction mode
     // (loopback requests pass, remote requests are rejected outright).
     public const string KeyAdminToken = "admin_token";
@@ -115,6 +120,10 @@ public class AppSettingsService
 
     /// <summary>Fallback upstream timeout (seconds) when a service's LimitConfig has none.</summary>
     public int RequestTimeoutDefaultS => GetI(KeyRequestTimeoutDefaultS, 120, 5, 3600);
+
+    /// <summary>Max seconds of upstream silence mid-stream before aborting (5..3600,
+    /// default 120). Upstreams send keep-alives/heartbeats more often than this.</summary>
+    public int StreamIdleTimeoutS => GetI(KeyStreamIdleTimeoutS, 120, 5, 3600);
 
     /// <summary>Admin token guarding /admin/*. Empty = not set (loopback-only mode).</summary>
     public string AdminToken => Get(KeyAdminToken, "");

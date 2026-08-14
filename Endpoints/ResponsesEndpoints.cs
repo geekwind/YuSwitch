@@ -69,6 +69,10 @@ public static class ResponsesEndpoints
         {
             return Error(404, ex.Message, "invalid_request_error");
         }
+        catch (ServiceCapacityException ex) when (!ctx.Response.HasStarted)
+        {
+            return Error(503, ex.Message, "server_error");
+        }
         catch (UpstreamException ex) when (!ctx.Response.HasStarted)
         {
             return UpstreamErrorPassthrough(ex);
@@ -441,7 +445,7 @@ public static class ResponsesEndpoints
         HttpContext ctx, GatewayService gw, ChatRequest chatReq,
         ResponsesRequest req, string apiKeyName, CancellationToken ct)
     {
-        SseWriter.StartSse(ctx.Response);
+        await SseWriter.StartSseAsync(ctx.Response);
 
         var responseId = "resp_" + Guid.NewGuid().ToString("N");
         var createdAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

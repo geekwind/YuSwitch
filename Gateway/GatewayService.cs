@@ -152,6 +152,7 @@ public class GatewayService
         // per attempt, so capture it now for the sticky-anchor update on success.
         var stickyModel = req.Model;
         Exception? lastErr = null;
+        var capacitySkipped = 0;   // candidates skipped because TryEnter refused (at cap)
         foreach (var (svc, model) in candidates)
         {
             var st = _states.Get(svc.Id);
@@ -159,7 +160,7 @@ public class GatewayService
             // Acquire the in-flight/concurrency/rate slot for this attempt. If the
             // service just hit its cap between selection and now, skip to the next
             // candidate rather than queue. Exit() releases it in the finally below.
-            if (!st.TryEnter(lim)) continue;
+            if (!st.TryEnter(lim)) { capacitySkipped++; continue; }
 
             var provider = _registry.Create(svc);
             ApplyRedirect(req, svc, model);
@@ -225,7 +226,11 @@ public class GatewayService
                 st.Exit();   // always release the in-flight/concurrency slot
             }
         }
-        throw lastErr ?? new ModelNotFoundException(req.Model);
+        // lastErr == null with candidates present means every candidate refused
+        // entry — that's capacity exhaustion (503), not a missing model (404).
+        throw lastErr ?? (capacitySkipped > 0
+            ? new ServiceCapacityException(req.Model)
+            : new ModelNotFoundException(req.Model));
     }
 
     /// <summary>Two-round web search simulation. Round 1 lets the upstream model
@@ -316,6 +321,11 @@ public class GatewayService
         ServiceEntity? activeSvc = null;
         ModelEntity? activeModel = null;
         ServiceRuntimeState? activeState = null;
+        // Linked source of the WINNING attempt — survives into Phase 2 so client
+        // cancellation (and the mid-stream idle timeout) always propagates into
+        // the provider's reads. Disposed in Phase 2's finally.
+        CancellationTokenSource? liveCts = null;
+        var capacitySkipped = 0;
 
         foreach (var (svc, model) in candidates)
         {
@@ -323,17 +333,18 @@ public class GatewayService
             var lim = svc.GetLimit();
             // Acquire the in-flight/concurrency/rate slot for the winning provider.
             // Skip (don't queue) a service that hit its cap between selection and now.
-            if (!st.TryEnter(lim)) continue;
+            if (!st.TryEnter(lim)) { capacitySkipped++; continue; }
 
             var provider = _registry.Create(svc);
             ApplyRedirect(req, svc, model);
             // The upstream HttpClient has no timeout of its own; this bounds the
             // wait for the FIRST chunk (per-service TimeoutSeconds, else the
-            // global default). Once streaming, the client's own ct governs.
+            // global default). NOT 'using': on success the source is promoted to
+            // liveCts; on failure it is disposed inside the catch below.
             var effTimeoutS = lim.TimeoutSeconds > 0 ? lim.TimeoutSeconds : _settings.RequestTimeoutDefaultS;
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(effTimeoutS));
-            var effCt = timeoutCts.Token;
+            var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(TimeSpan.FromSeconds(effTimeoutS));
+            var effCt = attemptCts.Token;
             iter = provider.StreamAsync(req, effCt).GetAsyncEnumerator(effCt);
             try
             {
@@ -350,6 +361,10 @@ public class GatewayService
                 _lastPicked[$"{stickyModel}|{svc.Priority}"] = svc.Id;   // sticky anchor
                 // Notify service state change (breaker closed)
                 _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                // First chunk in hand: clear the first-byte deadline and promote
+                // the linked source to liveCts for Phase 2.
+                attemptCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                liveCts = attemptCts;
                 break; // got a first chunk (or clean empty), use this provider
             }
             catch (Exception ex)
@@ -362,6 +377,7 @@ public class GatewayService
                 if (ex is OperationCanceledException && ct.IsCancellationRequested)
                 {
                     st.Exit();
+                    attemptCts.Dispose();
                     await iter.DisposeAsync();
                     iter = null;
                     throw;
@@ -376,6 +392,7 @@ public class GatewayService
                 _usage.Record(BuildLog(svc, model, req, apiKeyName, null, sw, false,
                     ex is UpstreamException ue ? (int)ue.StatusCode : 500, ex.Message));
                 RecordTrace(req.ClientModel.Length > 0 ? req.ClientModel : req.Model, req.SessionId, svc.Name, svc.Priority, svc.Weight, false);
+                attemptCts.Dispose();
                 await iter.DisposeAsync();
                 iter = null;
                 // A caller error (400/422/... — NOT 401/403) is the client's
@@ -388,7 +405,9 @@ public class GatewayService
         }
 
         if (iter is null || activeSvc is null || activeState is null)
-            throw lastErr ?? new ModelNotFoundException(req.Model);
+            throw lastErr ?? (capacitySkipped > 0
+                ? new ServiceCapacityException(req.Model)
+                : new ModelNotFoundException(req.Model));
 
         // Phase 2: stream through. The in-flight slot for the winning provider was
         // acquired in Phase 1; it MUST be released when the stream ends for ANY
@@ -400,6 +419,7 @@ public class GatewayService
         long ttft = ElapsedMs(sw);   // first chunk already obtained → TTFT known
         var respPreview = new System.Text.StringBuilder(256);
         var reasoningPreview = new System.Text.StringBuilder(256);
+        var idleTimeout = TimeSpan.FromSeconds(_settings.StreamIdleTimeoutS);
         try
         {
             if (firstChunk is not null)
@@ -408,8 +428,40 @@ public class GatewayService
                 AccumulatePreview(respPreview, reasoningPreview, firstChunk);
                 yield return firstChunk;
             }
-            while (await iter.MoveNextAsync())
+            while (true)
             {
+                var moveTask = iter.MoveNextAsync().AsTask();
+                bool hasNext;
+                try
+                {
+                    // Bounded by BOTH the idle timeout and the client ct: an
+                    // upstream that goes silent mid-stream no longer hangs the
+                    // request (leaking its in-flight slot and connection) forever.
+                    hasNext = await moveTask.WaitAsync(idleTimeout, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    var failure = ex;
+                    if (ex is TimeoutException)
+                    {
+                        // Idle timeout fired: cancel the linked source so the
+                        // provider's pending read unblocks and the enumerator can
+                        // unwind in the finally below.
+                        if (liveCts is not null) await liveCts.CancelAsync();
+                        try { await moveTask.WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* cancelled read */ }
+                        failure = new UpstreamIdleTimeoutException(_settings.StreamIdleTimeoutS);
+                    }
+                    // Bytes are already on the wire so failover is impossible, but
+                    // a mid-stream failure is still a health signal: feed the
+                    // breaker and the call log before the endpoint emits an SSE
+                    // error event. (yield can't sit in a try-with-catch — that's
+                    // why this catch wraps only MoveNextAsync, never a yield.)
+                    ApplyToBreaker(activeState, Classify(failure), lb);
+                    _usage.Record(BuildLog(activeSvc, activeModel!, req, apiKeyName, usage, sw, false,
+                        failure is UpstreamException ue ? (int)ue.StatusCode : 500, failure.Message, ttftMs: ttft));
+                    throw failure;
+                }
+                if (!hasNext) break;
                 var chunk = iter.Current;
                 if (chunk.Usage is { } u2) usage = u2;
                 AccumulatePreview(respPreview, reasoningPreview, chunk);
@@ -420,6 +472,7 @@ public class GatewayService
         {
             activeState.Exit();          // guaranteed release on every exit path
             await iter.DisposeAsync();   // guaranteed dispose (was clean-end-only before)
+            liveCts?.Dispose();
         }
         // Thinking models may produce only reasoning (content empty) — fall
         // back to the reasoning text so the call log explains the empty body.
@@ -489,7 +542,18 @@ public class GatewayService
             // applies if the pinned service errors during the actual call.
             if (!string.IsNullOrEmpty(sessionId))
             {
-                var pinnedIdx = StableHash(model, sessionId!) % tierList.Count;
+                var hashIdx = StableHash(model, sessionId!) % tierList.Count;
+                // A pinned service whose breaker is cooling makes EVERY request in
+                // the session eat a full failure (up to the whole service timeout
+                // for a hung upstream) before failover. Walk the ring from the hash
+                // slot to the first available service — still deterministic per
+                // session, but a broken pin no longer stalls the conversation.
+                var pinnedIdx = hashIdx;
+                for (var step = 0; step < tierList.Count; step++)
+                {
+                    var idx = (hashIdx + step) % tierList.Count;
+                    if (_states.Get(tierList[idx].Item1.Id).IsAvailable(lb)) { pinnedIdx = idx; break; }
+                }
                 var pinned = tierList[pinnedIdx];
                 tierList.RemoveAt(pinnedIdx);
                 result.Add(pinned);
@@ -582,11 +646,12 @@ public class GatewayService
             throw new ModelNotFoundException(clientModel);
 
         Exception? lastErr = null;
+        var capacitySkipped = 0;
         foreach (var (svc, model) in candidates)
         {
             var st = _states.Get(svc.Id);
             var lim = svc.GetLimit();
-            if (!st.TryEnter(lim)) continue;
+            if (!st.TryEnter(lim)) { capacitySkipped++; continue; }
 
             var provider = _registry.Create(svc);
             if (provider is not IEmbeddingProvider embedder)
@@ -660,7 +725,9 @@ public class GatewayService
                 st.Exit();
             }
         }
-        throw lastErr ?? new ModelNotFoundException(clientModel);
+        throw lastErr ?? (capacitySkipped > 0
+            ? new ServiceCapacityException(clientModel)
+            : new ModelNotFoundException(clientModel));
     }
 
     /// <summary>How a provider failure should be treated by the breaker AND the
@@ -707,8 +774,10 @@ public class GatewayService
     {
         var bytes = Encoding.UTF8.GetBytes($"{model}|{sessionId}");
         var h = SHA256.HashData(bytes);
-        // First 4 bytes as big-endian int32
-        return Math.Abs((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]);
+        // First 4 bytes as big-endian int32, masked non-negative (Math.Abs would
+        // throw on int.MinValue).
+        var raw = (uint)((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]);
+        return (int)(raw & 0x7FFFFFFF);
     }
 
     private static void ApplyRedirect(ChatRequest req, ServiceEntity svc, ModelEntity model)
@@ -775,6 +844,23 @@ public class GatewayService
 public class ModelNotFoundException : Exception
 {
     public ModelNotFoundException(string model) : base($"model '{model}' not found or not enabled") { }
+}
+
+/// <summary>Every candidate service refused entry (concurrency/rate cap reached).
+/// Endpoints map this to 503/429 — never 404, the model exists, the pool is full.</summary>
+public class ServiceCapacityException : Exception
+{
+    public ServiceCapacityException(string model)
+        : base($"all services for model '{model}' are at capacity (concurrency or rate limit reached); retry shortly") { }
+}
+
+/// <summary>The upstream sent its first chunk then went silent longer than the
+/// configured stream idle timeout. Treated as a hard failure (breaker + log);
+/// surfaced to the client as a mid-stream SSE error event.</summary>
+public class UpstreamIdleTimeoutException : Exception
+{
+    public UpstreamIdleTimeoutException(int idleSeconds)
+        : base($"upstream produced no data for {idleSeconds}s mid-stream (idle timeout)") { }
 }
 
 /// <summary>One dispatch decision (for /admin/dispatch-trace observability).</summary>

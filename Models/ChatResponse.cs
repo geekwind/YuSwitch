@@ -34,6 +34,14 @@ public class ResponseMessage
     public string? Content { get; set; }
     public string? ReasoningContent { get; set; }
     public List<ToolCall>? ToolCalls { get; set; }
+    /// <summary>Signature of the upstream Anthropic thinking block (in-process
+    /// only — lets the Anthropic endpoint re-emit a verifiable thinking block).
+    /// Never serialized to OpenAI clients.</summary>
+    [JsonIgnore]
+    public string? ThinkingSignature { get; set; }
+    /// <summary>Opaque payload of a redacted_thinking block, same in-process role.</summary>
+    [JsonIgnore]
+    public string? RedactedThinkingData { get; set; }
 }
 
 /// <summary>One incremental streaming chunk (OpenAI chat.completion.chunk).</summary>
@@ -66,6 +74,11 @@ public class Delta
     public string? Content { get; set; }
     public string? ReasoningContent { get; set; }
     public List<ToolCall>? ToolCalls { get; set; }
+    /// <summary>signature_delta from a Claude upstream thinking block (in-process
+    /// only — the Anthropic endpoint forwards it as a signature_delta event so the
+    /// client can echo a verifiable thinking block in later history).</summary>
+    [JsonIgnore]
+    public string? ThinkingSignature { get; set; }
 }
 
 public class Usage : IJsonOnDeserialized

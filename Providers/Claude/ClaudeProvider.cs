@@ -126,6 +126,7 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
         // message_delta chunk, which is the one that survives into the log.
         int cacheCreationInputTokens = 0;
         int cacheReadInputTokens = 0;
+        int messageStartInputTokens = 0;   // message_delta.usage carries only output_tokens
 
         // Anthropic streams tool calls as content_block_start(tool_use) +
         // input_json_delta fragments, addressed by content-block index. Map
@@ -134,11 +135,11 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
         var blockToToolIndex = new Dictionary<int, int>();
         int nextToolIndex = 0;
 
-        while (!reader.EndOfStream)
+        // ReadLineAsync-until-null only: StreamReader.EndOfStream does a SYNC
+        // blocking read when its buffer is empty (i.e. between every two SSE
+        // events), pinning a thread-pool thread per concurrent stream.
+        while (await reader.ReadLineAsync(ct) is { } line)
         {
-            ct.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
             if (!line.StartsWith("data:")) continue;
             var data = line[5..].Trim();
             if (string.IsNullOrEmpty(data)) continue;
@@ -197,6 +198,30 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                                 Choices = new List<StreamChoice> { new() { Index = 0, Delta = new() { Content = txt.GetString() } } },
                             };
                         }
+                        else if (dt.GetString() == "thinking_delta" &&
+                                 delta.TryGetProperty("thinking", out var thk))
+                        {
+                            // Extended thinking → OpenAI-style reasoning_content so
+                            // both OpenAI clients and the Anthropic endpoint (which
+                            // re-emits it as a thinking block) can render it.
+                            yield return new StreamChunk
+                            {
+                                Id = chunkId, Created = created, Model = model,
+                                Choices = new List<StreamChoice> { new() { Index = 0, Delta = new() { ReasoningContent = thk.GetString() } } },
+                            };
+                        }
+                        else if (dt.GetString() == "signature_delta" &&
+                                 delta.TryGetProperty("signature", out var sg))
+                        {
+                            // Thinking-block signature — carried in-process to the
+                            // Anthropic endpoint (JsonIgnore on the wire) so the
+                            // client can echo a verifiable thinking block later.
+                            yield return new StreamChunk
+                            {
+                                Id = chunkId, Created = created, Model = model,
+                                Choices = new List<StreamChoice> { new() { Index = 0, Delta = new() { ThinkingSignature = sg.GetString() } } },
+                            };
+                        }
                         else if (dt.GetString() == "input_json_delta" &&
                                  delta.TryGetProperty("partial_json", out var pj) &&
                                  root.TryGetProperty("index", out var dIdx) &&
@@ -235,7 +260,10 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                     {
                         usage = new Usage
                         {
-                            PromptTokens = u.TryGetProperty("input_tokens", out var it) ? it.GetInt32() : 0,
+                            // message_delta.usage normally carries ONLY
+                            // output_tokens — fall back to the message_start value
+                            // so the log's prompt tokens aren't zeroed.
+                            PromptTokens = u.TryGetProperty("input_tokens", out var it) ? it.GetInt32() : messageStartInputTokens,
                             CompletionTokens = u.TryGetProperty("output_tokens", out var ot) ? ot.GetInt32() : 0,
                             // Real Anthropic carries cache stats in message_start
                             // (captured above); Zhipu GLM puts them in
@@ -255,7 +283,7 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                             Id = chunkId, Created = created, Model = model,
                             Choices = finishReason is not null
                                 ? new List<StreamChoice> { new() { Index = 0, Delta = new(), FinishReason = finishReason } }
-                                : null,
+                                : new List<StreamChoice>(),   // usage-only chunk: spec wants "choices": []
                             Usage = usage,
                         };
                     }
@@ -268,16 +296,29 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                         // Cache stats arrive here (cache_creation_input_tokens /
                         // cache_read_input_tokens), not in message_delta.
                         int prompt = mu.TryGetProperty("input_tokens", out var it2) ? it2.GetInt32() : 0;
+                        messageStartInputTokens = prompt;
                         cacheCreationInputTokens = mu.TryGetProperty("cache_creation_input_tokens", out var cc) ? cc.GetInt32() : 0;
                         cacheReadInputTokens = mu.TryGetProperty("cache_read_input_tokens", out var cr) ? cr.GetInt32() : 0;
-                        // input tokens known here; output unknown yet — emit usage chunk
+                        // input tokens known here; output unknown yet — emit usage chunk.
+                        // Also carries the OpenAI-convention first delta role:"assistant".
                         yield return new StreamChunk
                         {
                             Id = chunkId, Created = created, Model = model,
+                            Choices = new List<StreamChoice> { new() { Index = 0, Delta = new() { Role = "assistant" } } },
                             Usage = new Usage { PromptTokens = prompt },
                         };
                     }
                     break;
+                case "error":
+                    // Anthropic signals mid-stream failures (overloaded etc.) as an
+                    // error EVENT, not an HTTP status — surface it instead of
+                    // silently ending the stream with no finish_reason.
+                    throw new UpstreamException(
+                        root.TryGetProperty("error", out var errEl) &&
+                        errEl.TryGetProperty("type", out var et) && et.GetString() == "overloaded_error"
+                            ? (System.Net.HttpStatusCode)529
+                            : System.Net.HttpStatusCode.InternalServerError,
+                        data);
             }
         }
     }
@@ -327,10 +368,19 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
 
             FlushToolResults();
 
+            // Signed thinking blocks from inbound history must lead the assistant
+            // turn (Anthropic validates them ahead of tool_use). Unsigned reasoning
+            // (e.g. DeepSeek-originated) is dropped — Anthropic rejects unsigned
+            // thinking blocks.
+            var signedThinking = m.Role == "assistant" && m.ThinkingBlocks is { Count: > 0 }
+                ? m.ThinkingBlocks.Where(tb => !string.IsNullOrEmpty(tb.Signature) || !string.IsNullOrEmpty(tb.RedactedData)).ToList()
+                : null;
+
             if (m.Role == "assistant" && m.ToolCalls is { Count: > 0 })
             {
-                // Assistant turn that called tools → text block(s) + tool_use blocks.
+                // Assistant turn that called tools → thinking + text + tool_use blocks.
                 var blocks = new List<object>();
+                AppendThinkingBlocks(blocks, signedThinking);
                 AppendContentBlocks(blocks, m);
                 foreach (var tc in m.ToolCalls)
                 {
@@ -346,10 +396,12 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                 continue;
             }
 
-            if (m.Parts is { Count: > 0 })
+            if (m.Parts is { Count: > 0 } || signedThinking is { Count: > 0 })
             {
-                // Multimodal content → Anthropic content-block array.
+                // Multimodal content (or plain text needing thinking blocks in
+                // front) → Anthropic content-block array.
                 var blocks = new List<object>();
+                AppendThinkingBlocks(blocks, signedThinking);
                 AppendContentBlocks(blocks, m);
                 msgs.Add(new { role = m.Role, content = blocks });
                 continue;
@@ -362,11 +414,15 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
         }
         FlushToolResults();
 
+        // Anthropic requires max_tokens; OpenAI clients routinely omit it (and
+        // newer SDKs send max_completion_tokens). 1024 silently truncated long
+        // answers — default to 8192 (safe for every current Claude model).
+        var maxTokens = req.MaxTokens ?? req.MaxCompletionTokens ?? 8192;
         var payload = new Dictionary<string, object?>
         {
             ["model"] = req.Model,
             ["messages"] = msgs,
-            ["max_tokens"] = req.MaxTokens ?? 1024,
+            ["max_tokens"] = maxTokens,
             ["stream"] = stream,
         };
         if (systemText.Length > 0)
@@ -380,20 +436,68 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
         if (req.TopK.HasValue) payload["top_k"] = req.TopK;
         if (req.Stop is { Count: > 0 }) payload["stop_sequences"] = req.Stop;
         if (req.Tools is { Count: > 0 }) payload["tools"] = ConvertTools(req.Tools);
+        if (req.EffectiveReasoning is { Enabled: true } rc)
+        {
+            // Anthropic extended thinking: budget_tokens must be ≥1024 and leave
+            // room for the visible answer inside max_tokens.
+            var budget = rc.MaxThinkingTokens ?? (rc.Effort switch
+            {
+                ReasoningEffort.Minimal => 1024,
+                ReasoningEffort.Low => 2048,
+                ReasoningEffort.Medium => 4096,
+                ReasoningEffort.High => 8192,
+                _ => 16384,   // XHigh / Max
+            });
+            if (budget > maxTokens - 1024)
+            {
+                // Grow max_tokens rather than clamping the budget below what was
+                // asked (or 400ing on budget ≥ max_tokens).
+                maxTokens = budget + 4096;
+                payload["max_tokens"] = maxTokens;
+            }
+            payload["thinking"] = new { type = "enabled", budget_tokens = budget };
+        }
         if (req.ToolChoice is not null)
         {
-            // OpenAI tool_choice → Anthropic tool_choice mapping.
-            var tcJson = req.ToolChoice.RootElement.GetRawText();
-            if (tcJson.Contains("auto", StringComparison.OrdinalIgnoreCase))
-                payload["tool_choice"] = new { type = "auto" };
-            else if (tcJson.Contains("none", StringComparison.OrdinalIgnoreCase))
-                payload["tool_choice"] = new { type = "none" };
-            else if (tcJson.Contains("required", StringComparison.OrdinalIgnoreCase))
-                payload["tool_choice"] = new { type = "any" };
+            // OpenAI tool_choice → Anthropic tool_choice mapping:
+            //   "auto"/"none"/"required"            → {type:auto|none|any}
+            //   {"type":"function","function":{"name":"x"}} → {type:"tool",name:"x"}
+            //   already Anthropic-shaped            → pass through
+            var el = req.ToolChoice.RootElement;
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                var s = el.GetString();
+                payload["tool_choice"] = s == "none" ? (object)new { type = "none" }
+                    : s == "required" ? new { type = "any" }
+                    : new { type = "auto" };
+            }
+            else if (el.ValueKind == JsonValueKind.Object &&
+                     el.TryGetProperty("function", out var fn) &&
+                     fn.ValueKind == JsonValueKind.Object &&
+                     fn.TryGetProperty("name", out var fnName))
+            {
+                payload["tool_choice"] = new { type = "tool", name = fnName.GetString() ?? "" };
+            }
             else
-                payload["tool_choice"] = req.ToolChoice; // pass as-is for named tool
+            {
+                payload["tool_choice"] = req.ToolChoice; // already Anthropic-shaped
+            }
         }
         return payload;
+    }
+
+    /// <summary>Prepend preserved signed/redacted thinking blocks to an assistant
+    /// turn's content. Anthropic requires them ahead of any text/tool_use block.</summary>
+    private static void AppendThinkingBlocks(List<object> blocks, List<ThinkingBlockInfo>? thinking)
+    {
+        if (thinking is null) return;
+        foreach (var tb in thinking)
+        {
+            if (!string.IsNullOrEmpty(tb.RedactedData))
+                blocks.Add(new { type = "redacted_thinking", data = tb.RedactedData });
+            else
+                blocks.Add(new { type = "thinking", thinking = tb.Thinking, signature = tb.Signature! });
+        }
     }
 
     /// <summary>Append a message's content (Parts if multimodal, else plain text)
@@ -477,10 +581,19 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
     private static ChatResponse AnthropicToChat(AnthropicResponse ar, ChatRequest req)
     {
         var text = new StringBuilder();
+        var thinking = new StringBuilder();
+        string? thinkingSig = null;
+        string? redactedData = null;
         var toolCalls = new List<ToolCall>();
         foreach (var c in ar.Content ?? new())
         {
             if (c.Type == "text") text.Append(c.Text);
+            else if (c.Type == "thinking")
+            {
+                thinking.Append(c.Thinking);
+                if (!string.IsNullOrEmpty(c.Signature)) thinkingSig = c.Signature;
+            }
+            else if (c.Type == "redacted_thinking") redactedData = c.Data;
             else if (c.Type == "tool_use")
                 toolCalls.Add(new ToolCall
                 {
@@ -510,6 +623,9 @@ public class ClaudeProvider : IProvider, ISupportsTools, ISupportsVision, ISuppo
                     {
                         Role = "assistant",
                         Content = text.Length > 0 ? text.ToString() : (toolCalls.Count > 0 ? null : ""),
+                        ReasoningContent = thinking.Length > 0 ? thinking.ToString() : null,
+                        ThinkingSignature = thinkingSig,
+                        RedactedThinkingData = redactedData,
                         ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
                     },
                     FinishReason = AnthropicStopToOpenAI(ar.StopReason),
@@ -601,6 +717,10 @@ public class AnthropicContent
 {
     public string Type { get; set; } = "text";
     public string? Text { get; set; }
+    // thinking / redacted_thinking blocks
+    public string? Thinking { get; set; }
+    public string? Signature { get; set; }
+    public string? Data { get; set; }
     // tool_use blocks
     public string? Id { get; set; }
     public string? Name { get; set; }

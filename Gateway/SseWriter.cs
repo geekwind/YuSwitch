@@ -16,13 +16,13 @@ public static class SseWriter
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    public static void StartSse(HttpResponse response)
+    public static async Task StartSseAsync(HttpResponse response)
     {
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no";
-        response.StartAsync().GetAwaiter().GetResult();
+        await response.StartAsync();
     }
 
     public static async Task WriteChunkAsync(HttpResponse response, StreamChunk chunk, CancellationToken ct)

@@ -919,6 +919,7 @@ public static class AdminEndpoints
             // the UI shows "set/not set" but never the plaintext.
             [AppSettingsService.KeyWebSearchTavilyKey] = MaskSecret(settings.WebSearchTavilyKey),
             [AppSettingsService.KeyRequestTimeoutDefaultS] = settings.RequestTimeoutDefaultS.ToString(),
+            [AppSettingsService.KeyStreamIdleTimeoutS] = settings.StreamIdleTimeoutS.ToString(),
             [AppSettingsService.KeyHealthProbeEnabled] = settings.HealthProbeEnabled ? "true" : "false",
             [AppSettingsService.KeyHealthProbeIntervalS] = settings.HealthProbeIntervalS.ToString(),
             // Adaptive LB / circuit-breaker / rate-limit tunables (hot-reloaded).
@@ -951,6 +952,7 @@ public static class AdminEndpoints
             AppSettingsService.KeyWebSearchTavilyKey,
             AppSettingsService.KeyUpdateBaseUrl,
             AppSettingsService.KeyRequestTimeoutDefaultS,
+            AppSettingsService.KeyStreamIdleTimeoutS,
             AppSettingsService.KeyHealthProbeEnabled,
             AppSettingsService.KeyHealthProbeIntervalS,
             // Adaptive LB / circuit-breaker / rate-limit tunables + retention.

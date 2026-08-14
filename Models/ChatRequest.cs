@@ -25,15 +25,32 @@ public class ChatRequest
 
     public ReasoningConfig? Reasoning { get; set; }
 
+    /// <summary>OpenAI flat form ("reasoning_effort":"low"). Normalized into
+    /// <see cref="Reasoning"/> by <see cref="EffectiveReasoning"/> so providers
+    /// only ever read one shape.</summary>
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>The reasoning config a provider should act on: the object form
+    /// wins; otherwise a flat reasoning_effort string implies Enabled.</summary>
+    [JsonIgnore]
+    public ReasoningConfig? EffectiveReasoning =>
+        Reasoning ?? (Enum.TryParse<ReasoningEffort>(ReasoningEffort, true, out var e)
+            ? new ReasoningConfig { Enabled = true, Effort = e }
+            : null);
+
     public bool Stream { get; set; }
     public StreamOptions? StreamOptions { get; set; }
 
     public int? MaxTokens { get; set; }
+    /// <summary>Newer OpenAI SDKs send this instead of max_tokens. Treated as an
+    /// alias: providers read MaxTokens ?? MaxCompletionTokens.</summary>
+    public int? MaxCompletionTokens { get; set; }
     public float? Temperature { get; set; }
     public float? TopP { get; set; }
     public int? TopK { get; set; }
     public float? FrequencyPenalty { get; set; }
     public float? PresencePenalty { get; set; }
+    [JsonConverter(typeof(StringOrStringListConverter))]
     public List<string>? Stop { get; set; }
     public int? Seed { get; set; }
     public int? N { get; set; }
@@ -97,6 +114,44 @@ public class ChatMessage
     /// upstream caches the prefix; ignored by OpenAI-compatible upstreams.</summary>
     [JsonIgnore]
     public string? CacheControl { get; set; }
+
+    /// <summary>Anthropic extended-thinking blocks from inbound message history,
+    /// preserved verbatim (thinking text + signature / redacted data) so a
+    /// Claude-native upstream receives them intact — the Messages API rejects
+    /// thinking-enabled tool-use turns whose signed thinking blocks were
+    /// stripped. Never serialized toward OpenAI-compatible upstreams.</summary>
+    [JsonIgnore]
+    public List<ThinkingBlockInfo>? ThinkingBlocks { get; set; }
+}
+
+/// <summary>One preserved Anthropic thinking block (see ChatMessage.ThinkingBlocks).</summary>
+public class ThinkingBlockInfo
+{
+    public string Thinking { get; set; } = "";
+    public string? Signature { get; set; }
+    /// <summary>Set for redacted_thinking blocks (opaque encrypted payload).</summary>
+    public string? RedactedData { get; set; }
+}
+
+/// <summary>OpenAI "stop" is a union: a single string OR an array of strings.
+/// The plain List&lt;string&gt; deserializer 400s on the string form — accept both,
+/// always write the array form (spec-legal).</summary>
+public class StringOrStringListConverter : JsonConverter<List<string>?>
+{
+    public override List<string>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null) return null;
+        if (reader.TokenType == JsonTokenType.String) return new List<string> { reader.GetString() ?? "" };
+        if (reader.TokenType == JsonTokenType.StartArray)
+            return JsonSerializer.Deserialize<List<string>>(ref reader, options);
+        throw new JsonException($"unexpected token {reader.TokenType} for a string-or-string-list field");
+    }
+
+    public override void Write(Utf8JsonWriter writer, List<string>? value, JsonSerializerOptions options)
+    {
+        if (value is null) { writer.WriteNullValue(); return; }
+        JsonSerializer.Serialize(writer, value, options);
+    }
 }
 
 /// <summary>
