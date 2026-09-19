@@ -11,3 +11,7 @@ logs/
 *.suo
 publish-*/
 dist/
+# Local test/design artifacts (mock upstream harness, browser QA, design zips)
+.cachetest/
+.playwright-mcp/
+.gstack/

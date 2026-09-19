@@ -19,7 +19,8 @@ public static class AnthropicEndpoints
 {
     public static IEndpointRouteBuilder MapAnthropicEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/v1");
+        // CORS "Any" only on the gateway data plane (see Program.cs).
+        var g = app.MapGroup("/v1").RequireCors("Any");
         g.MapPost("/messages", HandleMessages);
         g.MapPost("/messages/count_tokens", HandleCountTokens);
         return app;
@@ -104,6 +105,12 @@ public static class AnthropicEndpoints
         {
             return UpstreamErrorPassthrough(ex);
         }
+        catch (Exception ex)
+        {
+            // Unexpected (e.g. malformed upstream body): JSON error, never the
+            // Blazor /Error page on the API surface.
+            return AnthropicError(500, ex.Message, "api_error");
+        }
     }
 
     private static async Task<IResult> StreamAnthropic(
@@ -134,6 +141,10 @@ public static class AnthropicEndpoints
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return Results.Empty;
+        }
+        catch (Exception ex)
+        {
+            return AnthropicError(500, ex.Message, "api_error");
         }
 
         // Anthropic content blocks require unique, monotonically increasing

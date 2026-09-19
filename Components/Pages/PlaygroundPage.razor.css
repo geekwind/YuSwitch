@@ -1,0 +1,195 @@
+/* 接口测试：左 340px 配置面板 + 右结果区两栏 */
+
+.pg-layout {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 980px) {
+    .pg-layout { grid-template-columns: 1fr; }
+}
+
+/* 左：配置面板（卡片化） */
+.pg-config {
+    background: var(--eg-surface);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-lg);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    position: sticky;
+    top: 70px;
+}
+
+@media (max-width: 980px) {
+    .pg-config { position: static; }
+}
+
+/* 协议分段控件 */
+.pg-segmented {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    background: var(--eg-input);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius);
+    padding: 3px;
+}
+
+.pg-seg {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--eg-text-3);
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 0;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.13s ease, color 0.13s ease;
+}
+
+.pg-seg:hover { color: var(--eg-text); }
+
+.pg-seg.on {
+    background: color-mix(in srgb, var(--eg-primary) 18%, transparent);
+    color: var(--eg-accent-text);
+}
+
+/* 开关行 */
+.pg-switches {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 4px 0;
+}
+
+.pg-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12.5px;
+    color: var(--eg-text-2);
+}
+
+/* 图片预览 */
+.pg-img-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: var(--eg-hover);
+    border-radius: var(--eg-radius);
+}
+
+.pg-img-preview img {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 5px;
+    border: 1px solid var(--eg-border);
+}
+
+.pg-img-preview .eg-mono-dim {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 底部操作 */
+.pg-config-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.pg-send { flex: 1; }
+
+/* 右：结果区 */
+.pg-result {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.pg-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 24px;
+}
+
+/* 状态药丸内的小圆点 */
+.pg-dot-ok {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--eg-success);
+    margin-right: 2px;
+}
+
+.pg-pulse {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--eg-text-2);
+    margin-right: 4px;
+    animation: pg-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pg-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
+.pg-response-card .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 思考过程：accent 次级左边条 */
+.pg-reasoning { margin-bottom: 4px; }
+
+.pg-reasoning .pg-code {
+    margin-top: 6px;
+    border-left: 2px solid var(--eg-primary-2);
+}
+
+.pg-code {
+    background: var(--eg-code);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-sm);
+    padding: 0.6rem 0.75rem;
+    font-size: 12px;
+    color: var(--eg-text-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.pg-code-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* 响应正文 */
+.pg-response {
+    background: var(--eg-code);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-sm);
+    padding: 0.9rem 1rem;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--eg-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 120px;
+    margin: 0;
+}

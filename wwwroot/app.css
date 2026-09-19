@@ -1,58 +1,142 @@
 /* ==========================================================================
-   YuSwitch — 设计系统
-   现代深色侧栏 + 亮色内容区。令牌驱动，覆盖 Bootstrap 默认观感。
+   YuSwitch — Nocturne 设计系统
+   深色控制台为默认（:root 即深色 token），[data-theme="light"] 为浅色覆盖层。
+   命名沿用 --eg-* 前缀；组件规则大多只读变量，页面 markup 不需要感知主题。
    ========================================================================== */
 
+@font-face {
+    font-family: 'Inter';
+    src: url('fonts/inter-var.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('fonts/jetbrains-mono-var.woff2') format('woff2');
+    font-weight: 100 800;
+    font-display: swap;
+}
+
 :root {
-    /* 品牌主色：靛蓝（单色，克制使用；渐变仅保留 logo 一处） */
-    --eg-primary: #4f46e5;
-    --eg-primary-600: #4338ca;
-    --eg-primary-700: #3730a3;
-    --eg-primary-soft: #eef0fe;
-    --eg-accent: #4f46e5;
+    /* 品牌 accent：blurple，线与微光，不做大面积填色 */
+    --eg-primary: #9184d9;
+    --eg-primary-2: #7972a9;          /* accent 次级（按服务进度条等） */
+    --eg-accent-text: #d2cefd;        /* 正文尺寸的 accent 文本（模型名等） */
+    --eg-primary-600: #7a6fc7;
+    --eg-primary-700: #6b60b8;
+    --eg-primary-soft: rgba(145, 132, 217, 0.14);
+    --eg-accent: #9184d9;
 
-    /* 中性色阶（内容区） */
-    --eg-bg: #f5f6f8;          /* 页面背景 */
-    --eg-surface: #ffffff;     /* 卡片表面 */
-    --eg-border: #e4e6eb;      /* 细分割线 */
-    --eg-border-strong: #d5d9e4;
+    /* 中性色阶 */
+    --eg-bg: #161826;                 /* 页面底 */
+    --eg-surface: #1c1f30;            /* 卡片面 */
+    --eg-surface-2: #1f2233;          /* 次级面（表头 / 展开行 / tab 选中） */
+    --eg-input: #151725;              /* 输入框底 */
+    --eg-code: #12141f;               /* 代码块 / pre 底 */
+    --eg-border: #2e3145;
+    --eg-border-soft: #242739;        /* 表格行分隔等弱边框 */
+    --eg-border-strong: #3a3f58;
+    --eg-hover: #232741;              /* 行 hover / 轨道底 */
+    --eg-grid: #262a3c;               /* 图表网格线 */
 
-    --eg-text: #1c2333;        /* 主文本 */
-    --eg-text-2: #525b73;      /* 次文本 */
-    --eg-text-3: #8a93ab;      /* 弱化文本 */
+    --eg-text: #e9e9ed;
+    --eg-text-2: #a4a7bb;
+    --eg-text-3: #75798c;
 
-    /* 侧栏（深色） */
-    --eg-side-1: #171a26;
-    --eg-side-2: #11131c;
-    --eg-side-text: rgba(233, 236, 246, 0.78);
-    --eg-side-text-dim: rgba(233, 236, 246, 0.42);
+    /* 侧栏 */
+    --eg-side-1: #191b2a;
+    --eg-side-2: #191b2a;
+    --eg-side-text: #e9e9ed;
+    --eg-side-text-dim: rgba(233, 236, 246, 0.55);
+
+    /* 顶栏（毛玻璃） */
+    --eg-bar: rgba(22, 24, 38, 0.86);
 
     /* 语义色 */
-    --eg-success: #16a34a;
-    --eg-success-soft: #e7f6ec;
-    --eg-danger: #dc2626;
-    --eg-danger-soft: #fdecec;
-    --eg-warning: #d97706;
-    --eg-warning-soft: #fdf1e2;
-    --eg-info: #0284c7;
-    --eg-info-soft: #e6f4fb;
+    --eg-success: #7fbf9a;
+    --eg-success-soft: rgba(127, 191, 154, 0.16);
+    --eg-danger: #e08a86;
+    --eg-danger-soft: rgba(224, 138, 134, 0.16);
+    --eg-warning: #d9b26f;
+    --eg-warning-soft: #221d12;
+    --eg-warning-line: #4a3f22;
+    --eg-info: #8fb3d9;
+    --eg-info-soft: rgba(143, 179, 217, 0.14);
 
     /* 图表系列色（SVG 图表从这里取色，不要硬编码） */
-    --eg-chart-1: #4f46e5;
-    --eg-chart-2: #16a34a;
-    --eg-chart-3: #dc2626;
-    --eg-chart-4: #d97706;
-    --eg-chart-5: #0284c7;
+    --eg-chart-1: #9184d9;
+    --eg-chart-2: #7fbf9a;
+    --eg-chart-3: #e08a86;
+    --eg-chart-4: #d9b26f;
+    --eg-chart-5: #7972a9;
 
-    /* 圆角与阴影：工具类后台，克制 */
+    /* 圆角：卡片 8，按钮/输入 6-7，药丸 99 */
     --eg-radius-sm: 6px;
-    --eg-radius: 8px;
-    --eg-radius-lg: 10px;
-    --eg-shadow-sm: 0 1px 2px rgba(23, 26, 38, 0.05);
-    --eg-shadow: 0 1px 3px rgba(23, 26, 38, 0.07);
-    --eg-shadow-lg: 0 8px 24px rgba(23, 26, 38, 0.14);
+    --eg-radius: 7px;
+    --eg-radius-lg: 8px;
+    /* 阴影只在抽屉用；其余层级用 1px 边框表达 */
+    --eg-shadow-sm: none;
+    --eg-shadow: none;
+    --eg-shadow-lg: -24px 0 60px rgba(0, 0, 0, 0.5);
 
-    --eg-ring: 0 0 0 3px rgba(79, 70, 229, 0.16);
+    --eg-ring: 0 0 0 3px rgba(145, 132, 217, 0.25);
+}
+
+/* ==========================================================================
+   浅色变体：只覆盖 token，组件规则全部复用。
+   注意侧栏在浅色下必须一起变浅（深侧栏文字对比度只有 1.1:1）。
+   ========================================================================== */
+
+[data-theme="light"] {
+    --eg-primary: #5d5294;            /* 浅底上 accent 需更深一档 */
+    --eg-primary-2: #7972a9;
+    --eg-accent-text: #5d5294;
+    --eg-primary-600: #4a4182;
+    --eg-primary-700: #3f3873;
+    --eg-primary-soft: rgba(93, 82, 148, 0.10);
+    --eg-accent: #5d5294;
+
+    --eg-bg: #f3f5fe;
+    --eg-surface: #ffffff;
+    --eg-surface-2: #f7f8ff;
+    --eg-input: #f7f8ff;
+    --eg-code: #f3f5fe;
+    --eg-border: #e0e3f2;
+    --eg-border-soft: #ebedf8;
+    --eg-border-strong: #cdd2e8;
+    --eg-hover: #f3f4fe;
+    --eg-grid: #e9ebf7;
+
+    --eg-text: #292b31;
+    --eg-text-2: #595d6c;
+    --eg-text-3: #75798c;
+
+    --eg-side-1: #ffffff;
+    --eg-side-2: #ffffff;
+    --eg-side-text: #292b31;
+    --eg-side-text-dim: #75798c;
+
+    --eg-bar: rgba(243, 245, 254, 0.88);
+
+    --eg-success: #3f7f5f;
+    --eg-success-soft: rgba(63, 127, 95, 0.12);
+    --eg-danger: #a8443f;
+    --eg-danger-soft: rgba(168, 68, 63, 0.10);
+    --eg-warning: #8a6520;
+    --eg-warning-soft: #fdf6e6;
+    --eg-warning-line: #e8d9ae;
+    --eg-info: #3b6d94;
+    --eg-info-soft: rgba(59, 109, 148, 0.10);
+
+    --eg-chart-1: #5d5294;
+    --eg-chart-2: #3f7f5f;
+    --eg-chart-3: #a8443f;
+    --eg-chart-4: #8a6520;
+    --eg-chart-5: #7972a9;
+
+    --eg-shadow-lg: -24px 0 60px rgba(41, 43, 49, 0.18);
+    --eg-ring: 0 0 0 3px rgba(93, 82, 148, 0.20);
 }
 
 /* ---------- 基础 ---------- */
@@ -64,43 +148,44 @@ html, body {
     background: var(--eg-bg);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    font-size: 15px;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
 .content {
-    padding-top: 1.5rem;
-    padding-bottom: 3rem;
-    max-width: 1240px;
+    padding: 26px 28px 56px;
+    max-width: 1280px;
     margin: 0 auto;
 }
 
 h1, .h1 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
     color: var(--eg-text);
 }
 
 h1:focus { outline: none; }
 
-h5, .h5 { font-weight: 650; color: var(--eg-text); }
+h5, .h5 { font-weight: 600; color: var(--eg-text); }
 
 code, .font-monospace, pre {
     font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
     font-size: 0.86em;
+    font-variant-numeric: tabular-nums;
 }
 
 code {
     background: var(--eg-primary-soft);
-    color: var(--eg-primary-700);
+    color: var(--eg-accent-text);
     padding: 0.12em 0.4em;
     border-radius: 5px;
 }
 
 pre {
-    background: var(--eg-side-2);
-    color: #dbe2f4;
-    border: none !important;
+    background: var(--eg-code);
+    color: var(--eg-text-2);
+    border: 1px solid var(--eg-border) !important;
     border-radius: var(--eg-radius) !important;
 }
 
@@ -109,7 +194,18 @@ a, .btn-link {
     text-decoration: none;
 }
 
-    a:hover { color: var(--eg-primary-700); }
+    a:hover { color: var(--eg-accent-text); }
+
+::selection { background: rgba(145, 132, 217, 0.30); }
+
+:focus-visible {
+    outline: 2px solid var(--eg-primary);
+    outline-offset: 2px;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--eg-border-strong); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- 页头（每页标题区） ---------- */
 
@@ -117,16 +213,16 @@ a, .btn-link {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    gap: 1rem;
-    margin-bottom: 1.4rem;
+    gap: 20px;
+    margin-bottom: 20px;
 }
 
     .eg-pagehead .eg-title { margin: 0; }
 
     .eg-pagehead .eg-sub {
         color: var(--eg-text-3);
-        font-size: 0.9rem;
-        margin: 0.25rem 0 0;
+        font-size: 13px;
+        margin: 6px 0 0;
     }
 
 /* ---------- 卡片 ---------- */
@@ -135,38 +231,38 @@ a, .btn-link {
     background: var(--eg-surface);
     border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-lg);
-    box-shadow: var(--eg-shadow-sm);
+    box-shadow: none;
     overflow: hidden;
 }
 
 .card-header {
     background: transparent;
     border-bottom: 1px solid var(--eg-border);
-    padding: 0.85rem 1.2rem;
-    font-weight: 600;
-    font-size: 0.92rem;
+    padding: 11px 16px;
+    font-weight: 500;
+    font-size: 13px;
     color: var(--eg-text);
 }
 
-.card-body { padding: 1rem; }
+.card-body { padding: 14px 16px; }
 
-/* 统计卡片：图标 + 数值 + 标签 */
+/* 统计卡片：图标 + 数值 + 标签（保留给旧调用点） */
 .eg-stat {
     display: flex;
     align-items: center;
     gap: 0.9rem;
-    padding: 1.15rem 1.25rem;
+    padding: 1.05rem 1.15rem;
 }
 
     .eg-stat .eg-stat-icon {
         flex: none;
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         background: var(--eg-primary-soft);
         color: var(--eg-primary);
     }
@@ -177,72 +273,92 @@ a, .btn-link {
         .eg-stat .eg-stat-icon.tone-warning { background: var(--eg-warning-soft); color: var(--eg-warning); }
 
     .eg-stat .eg-stat-value {
-        font-size: 1.55rem;
-        font-weight: 700;
+        font-size: 22px;
+        font-weight: 600;
         line-height: 1.1;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.03em;
+        font-variant-numeric: tabular-nums;
         color: var(--eg-text);
     }
 
-        .eg-stat .eg-stat-value small { font-size: 0.85rem; font-weight: 500; color: var(--eg-text-3); }
+        .eg-stat .eg-stat-value small { font-size: 12px; font-weight: 400; color: var(--eg-text-3); }
 
     .eg-stat .eg-stat-label {
-        font-size: 0.82rem;
+        font-size: 11.5px;
         color: var(--eg-text-3);
         margin-top: 0.15rem;
     }
 
-/* ---------- 仪表盘统计条（紧凑，无卡片瀑布） ---------- */
+/* ---------- 指标条（仪表盘 / 用量 / 实时订阅共用） ----------
+   gap:1px 由边框色透出分隔线，整体 8px 圆角裁切。 */
 
-/* 一行多列的紧凑数字条：替代旧 Hero + 迷你卡片瀑布 */
 .eg-statbar {
-    display: flex;
-    flex-wrap: wrap;
-    background: var(--eg-surface);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: 1px;
+    background: var(--eg-border);
     border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-lg);
-    box-shadow: var(--eg-shadow-sm);
-    margin-bottom: 1rem;
+    overflow: hidden;
+    box-shadow: none;
+    margin-bottom: 16px;
 }
 
 .eg-statcell {
-    flex: 1 1 0;
-    min-width: 130px;
-    padding: 0.8rem 1.1rem;
-    border-right: 1px solid var(--eg-border);
+    background: var(--eg-surface);
+    padding: 13px 16px 14px;
+    min-width: 0;
 }
 
-    .eg-statcell:last-child { border-right: none; }
-
 .eg-statcell-label {
-    font-size: 0.76rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
     color: var(--eg-text-3);
-    font-weight: 600;
+    font-weight: 400;
     white-space: nowrap;
 }
 
+    .eg-statcell-label .eg-icon { color: var(--eg-text-3); }
+
 .eg-statcell-value {
-    font-size: 1.3rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    margin-top: 7px;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
     color: var(--eg-text);
-    line-height: 1.2;
-    margin-top: 0.1rem;
 }
 
-    .eg-statcell-value small { font-size: 0.8rem; font-weight: 500; color: var(--eg-text-3); }
+    .eg-statcell-value small {
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--eg-text-3);
+        letter-spacing: 0;
+    }
 
-.eg-statcell-sub { font-size: 0.75rem; color: var(--eg-text-3); margin-top: 0.1rem; white-space: nowrap; }
+.eg-statcell-sub {
+    margin-top: 5px;
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
 
 .eg-sep { color: var(--eg-text-3); font-weight: 400; margin: 0 0.1rem; }
 
-.eg-legend { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.9rem; font-size: 0.78rem; }
+/* 图例：14×2 线段 */
+.eg-legend { display: inline-flex; align-items: center; gap: 5px; margin-left: 14px; font-size: 11.5px; color: var(--eg-text-2); }
 
     .eg-legend i {
         display: inline-block;
-        width: 10px;
-        height: 10px;
-        border-radius: 3px;
+        width: 14px;
+        height: 2px;
+        border-radius: 2px;
     }
 
 .fw-600 { font-weight: 600; }
@@ -251,22 +367,23 @@ a, .btn-link {
 .text-success { color: var(--eg-success) !important; }
 .text-danger { color: var(--eg-danger) !important; }
 .text-warning { color: var(--eg-warning) !important; }
+.text-muted { color: var(--eg-text-3) !important; }
 
 /* ---------- Logo 选择器 ---------- */
 
-.eg-logo-picker { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+.eg-logo-picker { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .eg-logo-opt {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.9rem 1rem;
-    border: 1.5px solid var(--eg-border-strong);
-    border-radius: var(--eg-radius);
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-lg);
     cursor: pointer;
-    background: var(--eg-surface);
-    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    background: transparent;
+    transition: border-color 0.14s ease, background 0.14s ease;
     min-width: 96px;
 }
 
@@ -276,32 +393,37 @@ a, .btn-link {
 
     .eg-logo-opt.active {
         border-color: var(--eg-primary);
-        box-shadow: var(--eg-ring);
-        background: var(--eg-primary-soft);
+        background: color-mix(in srgb, var(--eg-primary) 10%, transparent);
+        box-shadow: none;
     }
 
+    .eg-logo-opt.eg-logo-upload { border-style: dashed; }
+
 .eg-logo-preview {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
-    background: #eef0f6;
+    font-size: 1.35rem;
+    background: var(--eg-hover);
     overflow: hidden;
 }
 
+    /* 品牌微光：accent 描边方块，不再用渐变 */
     .eg-logo-preview.eg-logo-auto {
-        background: linear-gradient(135deg, var(--eg-primary), var(--eg-accent));
-        color: #fff;
-        font-size: 0.85rem;
-        font-weight: 800;
+        background: transparent;
+        border: 1px solid var(--eg-primary);
+        color: var(--eg-primary);
+        font-size: 15px;
+        font-weight: 600;
+        box-shadow: 0 0 18px -6px var(--eg-primary);
     }
 
     .eg-logo-preview img { width: 100%; height: 100%; object-fit: cover; }
 
-.eg-logo-name { font-size: 0.8rem; color: var(--eg-text-2); }
+.eg-logo-name { font-size: 12px; color: var(--eg-text-2); }
 
 /* ---------- 异步反馈：按钮 spinner + 全局 toast ---------- */
 
@@ -322,12 +444,13 @@ a, .btn-link {
     display: flex;
     align-items: flex-start;
     gap: 0.6rem;
-    background: var(--eg-side-1);
-    color: #eef0f8;
-    border-radius: var(--eg-radius);
+    background: var(--eg-surface-2);
+    border: 1px solid var(--eg-border);
+    color: var(--eg-text);
+    border-radius: var(--eg-radius-lg);
     padding: 0.75rem 1rem;
-    font-size: 0.88rem;
-    box-shadow: var(--eg-shadow-lg);
+    font-size: 13px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
     animation: eg-toast-in 0.22s ease;
     white-space: pre-wrap;
     word-break: break-word;
@@ -363,17 +486,17 @@ a, .btn-link {
     margin-top: 6px; z-index: 1080;
     width: max-content; max-width: min(260px, 80vw);
     padding: 0.6rem 0.75rem;
-    background: var(--eg-surface); color: var(--eg-text-2);
+    background: var(--eg-surface-2); color: var(--eg-text-2);
     border: 1px solid var(--eg-border); border-radius: var(--eg-radius);
-    box-shadow: var(--eg-shadow-lg);
-    font-size: 0.8rem; font-weight: 400; line-height: 1.5;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    font-size: 12px; font-weight: 400; line-height: 1.5;
     white-space: normal; text-align: left;
     animation: eg-help-in 0.15s ease;
 }
 .eg-help-popover::before { /* 向上小箭头 */
     content: ""; position: absolute; top: -5px; left: 50%;
     transform: translateX(-50%) rotate(45deg);
-    width: 8px; height: 8px; background: var(--eg-surface);
+    width: 8px; height: 8px; background: var(--eg-surface-2);
     border-left: 1px solid var(--eg-border); border-top: 1px solid var(--eg-border);
 }
 @keyframes eg-help-in {
@@ -397,22 +520,22 @@ a, .btn-link {
 /* Token 构成堆叠条 */
 .eg-compbar {
     display: flex;
-    height: 14px;
+    height: 12px;
     border-radius: 99px;
     overflow: hidden;
-    background: #eef0f6;
+    background: var(--eg-hover);
 }
 
 .eg-compseg { height: 100%; transition: width 0.3s ease; }
 
-/* 调用链路：别名 → 真实模型 */
+/* 调用链路：别名 → 真实模型（横向版，保留给旧调用点） */
 .eg-chain { display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 
     .eg-chain .eg-chain-arrow { color: var(--eg-text-3); font-size: 0.8rem; }
 
     .eg-chain code { font-size: 0.78rem; }
 
-/* ---------- 表格 ---------- */
+/* ---------- 表格（保留给未 grid 化的页面） ---------- */
 
 .table {
     --bs-table-bg: transparent;
@@ -422,20 +545,22 @@ a, .btn-link {
 }
 
     .table > thead > tr > th {
-        background: #fafbfd;
-        color: var(--eg-text-2);
-        font-size: 0.76rem;
-        font-weight: 650;
+        background: var(--eg-surface-2);
+        color: var(--eg-text-3);
+        font-size: 10.5px;
+        font-weight: 400;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.09em;
         border-bottom: 1px solid var(--eg-border);
-        padding: 0.7rem 0.9rem;
+        padding: 0 0.9rem;
+        height: 38px;
+        vertical-align: middle;
         white-space: nowrap;
     }
 
     .table > tbody > tr > td {
         padding: 0.75rem 0.9rem;
-        border-bottom: 1px solid var(--eg-border);
+        border-bottom: 1px solid var(--eg-border-soft);
         vertical-align: middle;
         color: var(--eg-text-2);
     }
@@ -443,18 +568,16 @@ a, .btn-link {
     .table > tbody > tr:last-child > td { border-bottom: none; }
 
 .table-hover > tbody > tr:hover > * {
-    --bs-table-accent-bg: #f7f8fc;
-    background: #f7f8fc;
+    --bs-table-accent-bg: var(--eg-hover);
+    background: var(--eg-hover);
 }
 
-/* 表格容器卡片化。overflow 必须保持 visible：操作列的下拉菜单（如服务管理
-   「更多」）以 absolute 定位渲染在行内，overflow:hidden 会把最后几行的菜单
-   裁掉。圆角裁切改由下方四角单元格的 border-radius 完成。 */
+/* 表格容器卡片化 */
 .eg-table-card {
     background: var(--eg-surface);
     border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-lg);
-    box-shadow: var(--eg-shadow-sm);
+    box-shadow: none;
 }
 
     .eg-table-card .table > thead > tr > th:first-child { border-top-left-radius: calc(var(--eg-radius-lg) - 1px); }
@@ -465,75 +588,302 @@ a, .btn-link {
 
     .eg-table-card .table > tbody > tr:last-child > td:last-child { border-bottom-right-radius: calc(var(--eg-radius-lg) - 1px); }
 
-/* ---------- 按钮 ---------- */
+/* ---------- CSS Grid 表格（服务 / Key / 日志 / 路由追踪） ----------
+   行模板列宽由各页面 scoped CSS 以 --eg-gt-cols 注入。 */
 
-.btn {
-    border-radius: var(--eg-radius-sm);
-    font-weight: 550;
-    font-size: 0.9rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.14s ease;
-    border-width: 1px;
+.eg-gtable {
+    background: var(--eg-surface);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius-lg);
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
-.btn-sm { padding: 0.32rem 0.65rem; font-size: 0.83rem; border-radius: 7px; }
+.eg-gthead, .eg-grow {
+    display: grid;
+    grid-template-columns: var(--eg-gt-cols);
+    min-width: var(--eg-gt-min, 860px);
+    align-items: center;
+    padding: 0 16px;
+}
+
+.eg-gthead {
+    height: 38px;
+    background: var(--eg-surface-2);
+    border-bottom: 1px solid var(--eg-border);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--eg-text-3);
+}
+
+    .eg-gthead > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.eg-grow {
+    min-height: 50px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--eg-border-soft);
+    font-size: 12.5px;
+    color: var(--eg-text-2);
+}
+
+    .eg-grow:last-child { border-bottom: none; }
+
+    .eg-grow.eg-grow-click { cursor: pointer; }
+
+    .eg-grow:hover, .eg-grow.open { background: var(--eg-hover); }
+
+/* 两行堆叠单元：别名 + ↳ 上游真实模型 */
+.eg-chain2 {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.35;
+    padding-right: 10px;
+}
+
+    .eg-chain2 .eg-chain2-alias {
+        color: var(--eg-accent-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .eg-chain2 .eg-chain2-up {
+        color: var(--eg-text-3);
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+/* Tokens 两行右对齐 */
+.eg-tokens2 {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: var(--eg-text-2);
+    font-variant-numeric: tabular-nums;
+}
+
+    .eg-tokens2 .eg-tokens2-sub { color: var(--eg-text-3); }
+
+/* ---------- 按钮 ----------
+   全部为描边 + 透明底：主按钮 accent 描边 + 极淡底，次按钮灰描边。 */
+
+.btn {
+    border-radius: var(--eg-radius);
+    font-weight: 500;
+    font-size: 13px;
+    padding: 0 14px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    transition: all 0.14s ease;
+    border-width: 1px;
+    white-space: nowrap;
+}
+
+.btn-sm { padding: 0 9px; height: 27px; font-size: 12px; border-radius: 6px; }
 
 .btn-primary {
-    color: #fff;
-    background: var(--eg-primary);
-    border: 1px solid var(--eg-primary-600);
+    color: var(--eg-primary);
+    background: color-mix(in srgb, var(--eg-primary) 12%, transparent);
+    border: 1px solid var(--eg-primary);
 }
 
     .btn-primary:hover, .btn-primary:focus {
-        color: #fff;
-        background: var(--eg-primary-600);
-        border-color: var(--eg-primary-700);
+        color: var(--eg-primary);
+        background: color-mix(in srgb, var(--eg-primary) 24%, transparent);
+        border-color: var(--eg-primary);
     }
+
+    .btn-primary:disabled { color: var(--eg-primary); border-color: var(--eg-primary); background: transparent; }
+
+.btn-secondary {
+    color: var(--eg-text-2);
+    background: transparent;
+    border: 1px solid var(--eg-border);
+}
+
+    .btn-secondary:hover { color: var(--eg-text); background: var(--eg-hover); border-color: var(--eg-border); }
 
 .btn-outline-secondary {
     color: var(--eg-text-2);
-    border-color: var(--eg-border-strong);
-    background: var(--eg-surface);
+    border-color: var(--eg-border);
+    background: transparent;
 }
 
     .btn-outline-secondary:hover {
-        background: #f3f4f9;
-        border-color: var(--eg-text-3);
-        color: var(--eg-text);
+        background: transparent;
+        border-color: var(--eg-primary);
+        color: var(--eg-primary);
+    }
+
+.btn-outline-primary {
+    color: var(--eg-primary);
+    border-color: var(--eg-primary);
+    background: transparent;
+}
+
+    .btn-outline-primary:hover {
+        color: var(--eg-primary);
+        border-color: var(--eg-primary);
+        background: color-mix(in srgb, var(--eg-primary) 12%, transparent);
+    }
+
+.btn-outline-danger {
+    color: var(--eg-text-3);
+    border-color: var(--eg-border);
+    background: transparent;
+}
+
+    .btn-outline-danger:hover {
+        color: var(--eg-danger);
+        border-color: var(--eg-danger);
+        background: transparent;
     }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus,
 .form-control:focus, .form-select:focus, .form-check-input:focus {
-    box-shadow: var(--eg-ring);
-    border-color: var(--eg-primary);
-    outline: none;
+    box-shadow: none;
+    outline: 2px solid var(--eg-primary);
+    outline-offset: 1px;
 }
+
+/* 27px 方形图标按钮（复制 / 删除 / 更多等） */
+.eg-btn-icon {
+    width: 27px;
+    height: 27px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    border: 1px solid var(--eg-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--eg-text-3);
+    cursor: pointer;
+    transition: all 0.14s ease;
+}
+
+    .eg-btn-icon:hover { border-color: var(--eg-primary); color: var(--eg-primary); }
+
+    .eg-btn-icon.eg-btn-danger:hover { border-color: var(--eg-danger); color: var(--eg-danger); }
+
+/* ---------- 开关（32×18 药丸） ---------- */
+
+.eg-switch {
+    width: 32px;
+    height: 18px;
+    flex: none;
+    border-radius: 99px;
+    position: relative;
+    display: inline-block;
+    padding: 0;
+    cursor: pointer;
+    background: var(--eg-hover);
+    border: 1px solid var(--eg-border);
+    transition: background 0.15s ease, border-color 0.15s ease;
+    vertical-align: middle;
+}
+
+    .eg-switch .eg-switch-knob {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--eg-text-3);
+        transition: left 0.15s ease, background 0.15s ease;
+    }
+
+    .eg-switch.on {
+        background: color-mix(in srgb, var(--eg-primary) 55%, transparent);
+        border-color: var(--eg-primary);
+    }
+
+        .eg-switch.on .eg-switch-knob { left: 15px; background: #f3f5fe; }
+
+/* ---------- 药丸 / 徽章 ---------- */
+
+.eg-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+}
+
+    .eg-pill.eg-pill-ok { color: var(--eg-success); background: var(--eg-success-soft); }
+    .eg-pill.eg-pill-bad { color: var(--eg-danger); background: var(--eg-danger-soft); }
+    .eg-pill.eg-pill-acc { color: var(--eg-primary); background: color-mix(in srgb, var(--eg-primary) 16%, transparent); }
+    .eg-pill.eg-pill-neutral { color: var(--eg-text-2); background: var(--eg-hover); }
+    .eg-pill.eg-pill-outline { color: var(--eg-text-2); background: transparent; border: 1px solid var(--eg-border); }
 
 /* ---------- 表单 ---------- */
 
 .form-label {
-    font-size: 0.83rem;
-    font-weight: 600;
-    color: var(--eg-text-2);
-    margin-bottom: 0.35rem;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--eg-text-3);
+    margin-bottom: 6px;
 }
 
 .form-control, .form-select {
-    border: 1px solid var(--eg-border-strong);
+    border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-sm);
-    padding: 0.52rem 0.8rem;
-    font-size: 0.9rem;
+    padding: 0 11px;
+    height: 32px;
+    font-size: 13px;
     color: var(--eg-text);
-    background: var(--eg-surface);
-    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    background: var(--eg-input);
+    transition: border-color 0.14s ease;
 }
 
+textarea.form-control { height: auto; padding: 8px 11px; }
+
     .form-control::placeholder { color: var(--eg-text-3); }
+
+    .form-control:hover, .form-select:hover { border-color: var(--eg-border-strong); }
+
+    .form-control:focus, .form-select:focus {
+        background: var(--eg-input);
+        color: var(--eg-text);
+        border-color: var(--eg-primary);
+    }
+
+.form-control-sm, .form-select-sm { height: 30px; font-size: 12.5px; }
+
+.form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3e%3cpath fill='%2375798c' d='M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 28px;
+}
 
 .form-check-input {
     border: 1.5px solid var(--eg-border-strong);
     width: 1.05em;
     height: 1.05em;
+    background-color: var(--eg-input);
 }
 
     .form-check-input:checked {
@@ -541,13 +891,18 @@ a, .btn-link {
         border-color: var(--eg-primary);
     }
 
-/* ---------- 徽章 ---------- */
+.form-check-label { font-size: 12.5px; color: var(--eg-text-2); }
+
+.form-text { color: var(--eg-text-3); font-size: 11.5px; }
+
+/* ---------- 徽章（Bootstrap badge 语义色） ---------- */
 
 .badge {
-    border-radius: 6px;
-    font-weight: 600;
-    padding: 0.32em 0.6em;
-    font-size: 0.74rem;
+    border-radius: 99px;
+    font-weight: 400;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.01em;
 }
 
@@ -555,15 +910,15 @@ a, .btn-link {
 .bg-danger { background: var(--eg-danger-soft) !important; color: var(--eg-danger) !important; }
 .bg-warning { background: var(--eg-warning-soft) !important; color: var(--eg-warning) !important; }
 .bg-info { background: var(--eg-info-soft) !important; color: var(--eg-info) !important; }
-.bg-secondary { background: #eceef4 !important; color: var(--eg-text-2) !important; }
-.bg-light { background: #f1f2f8 !important; color: var(--eg-text-2) !important; }
+.bg-secondary { background: var(--eg-hover) !important; color: var(--eg-text-2) !important; }
+.bg-light { background: var(--eg-hover) !important; color: var(--eg-text-2) !important; }
 
 /* ---------- 进度条 ---------- */
 
 .progress {
-    background: #eceef4;
+    background: var(--eg-hover);
     border-radius: 99px;
-    height: 6px;
+    height: 4px;
 }
 
 .progress-bar {
@@ -571,51 +926,76 @@ a, .btn-link {
     border-radius: 99px;
 }
 
-.progress-bar.bg-info { background: var(--eg-info) !important; }
+.progress-bar.bg-info { background: var(--eg-primary-2) !important; }
 
 /* ---------- 告警 ---------- */
 
 .alert {
     border-radius: var(--eg-radius);
     border: 1px solid var(--eg-border);
-    font-size: 0.9rem;
+    font-size: 12.5px;
 }
 
 .alert-info {
     background: var(--eg-info-soft);
-    border-color: #bde3f5;
-    color: #0b5b86;
+    border-color: transparent;
+    color: var(--eg-info);
 }
 
 .alert-warning {
     background: var(--eg-warning-soft);
-    border-color: #f5ddb0;
-    color: #8a5a12;
+    border-color: var(--eg-warning-line);
+    color: var(--eg-warning);
+}
+
+.alert-danger {
+    background: var(--eg-danger-soft);
+    border-color: transparent;
+    color: var(--eg-danger);
 }
 
 /* ---------- 模态 ---------- */
 
-.eg-modal-backdrop { background: rgba(0, 0, 0, .5); }
+.eg-modal-backdrop { background: rgba(9, 10, 16, 0.62); }
 
 .modal-content {
-    border: none;
+    background: var(--eg-surface);
+    color: var(--eg-text);
+    border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-lg);
-    box-shadow: var(--eg-shadow-lg);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
 
 .modal-header {
     border-bottom: 1px solid var(--eg-border);
-    padding: 1.1rem 1.4rem;
+    padding: 14px 20px;
 }
 
-.modal-title { font-weight: 700; font-size: 1.1rem; }
+.modal-title { font-weight: 600; font-size: 15px; }
 
-.modal-body { padding: 1.4rem; }
+.modal-body { padding: 18px 20px; }
 
 .modal-footer {
     border-top: 1px solid var(--eg-border);
-    padding: 1rem 1.4rem;
+    padding: 14px 20px;
 }
+
+.btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+[data-theme="light"] .btn-close { filter: none; }
+
+/* ---------- 下拉菜单 ---------- */
+
+.dropdown-menu {
+    background: var(--eg-surface-2);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    font-size: 12.5px;
+}
+
+.dropdown-item { color: var(--eg-text-2); }
+
+    .dropdown-item:hover { background: var(--eg-hover); color: var(--eg-text); }
 
 /* ---------- 校验 ---------- */
 
@@ -626,10 +1006,10 @@ a, .btn-link {
 /* ---------- Blazor 错误条（可靠性，勿删） ---------- */
 
 #blazor-error-ui {
-    background: #fff5cc;
-    color: #6b5300;
+    background: var(--eg-warning-soft);
+    color: var(--eg-warning);
+    border-top: 1px solid var(--eg-warning-line);
     bottom: 0;
-    box-shadow: 0 -1px 2px rgba(0,0,0,0.2);
     display: none;
     left: 0;
     padding: 0.6rem 1.25rem 0.7rem 1.25rem;
@@ -652,100 +1032,238 @@ a, .btn-link {
 }
 
     .blazor-error-boundary::after {
-        content: "An error has occurred."
+        content: "An error has occurred.";
     }
 
 .darker-border-checkbox.form-check-input { border-color: var(--eg-border-strong); }
 
-/* ==========================================================================
-   暗色主题：<html data-theme="dark"> 时的 token 覆盖层。
-   只覆盖变量与少量硬编码底色，组件规则全部复用。
-   ========================================================================== */
+/* ---------- 深色下少量硬编码修正 ---------- */
 
-[data-theme="dark"] {
-    --eg-primary: #818cf8;
-    --eg-primary-600: #6d78f2;
-    --eg-primary-700: #5b64e0;
-    --eg-primary-soft: #262a45;
+pre.bg-light { background: var(--eg-code) !important; color: var(--eg-text-2); }
 
-    --eg-bg: #12141c;
-    --eg-surface: #1a1d28;
-    --eg-border: #2a2e3d;
-    --eg-border-strong: #383d50;
+/* ---------- 抽屉（右侧滑出编辑面板：服务 / Key / 设置复用） ---------- */
 
-    --eg-text: #e5e8f2;
-    --eg-text-2: #a8b0c6;
-    --eg-text-3: #6f7890;
-
-    --eg-side-1: #0d0f16;
-    --eg-side-2: #090a10;
-
-    --eg-success: #34d399;
-    --eg-success-soft: #12291f;
-    --eg-danger: #f87171;
-    --eg-danger-soft: #2f1a1a;
-    --eg-warning: #fbbf24;
-    --eg-warning-soft: #2d2312;
-    --eg-info: #38bdf8;
-    --eg-info-soft: #10222e;
-
-    --eg-chart-1: #818cf8;
-    --eg-chart-2: #34d399;
-    --eg-chart-3: #f87171;
-    --eg-chart-4: #fbbf24;
-    --eg-chart-5: #38bdf8;
-
-    --eg-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --eg-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    --eg-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
-    --eg-ring: 0 0 0 3px rgba(129, 140, 248, 0.25);
+.eg-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    background: rgba(9, 10, 16, 0.6);
+    backdrop-filter: blur(2px);
+    display: flex;
+    justify-content: flex-end;
+    animation: eg-drawer-fade 0.18s ease;
 }
 
-    /* 亮色规则里散落的硬编码底色，暗色下重定向到变量。 */
-    [data-theme="dark"] .table > thead > tr > th { background: #1e2230; }
+@keyframes eg-drawer-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
 
-    [data-theme="dark"] .table-hover > tbody > tr:hover > * {
-        --bs-table-accent-bg: #20242f;
-        background: #20242f;
+.eg-drawer {
+    width: 640px;
+    max-width: 94vw;
+    height: 100%;
+    background: var(--eg-surface);
+    border-left: 1px solid var(--eg-border);
+    box-shadow: var(--eg-shadow-lg);
+    display: flex;
+    flex-direction: column;
+    animation: eg-drawer-slide 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes eg-drawer-slide {
+    from { transform: translateX(40px); opacity: 0.4; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.eg-drawer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--eg-border);
+}
+
+.eg-drawer-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--eg-text);
+    line-height: 1.3;
+}
+
+.eg-drawer-sub {
+    margin-top: 3px;
+    font-size: 11.5px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--eg-text-3);
+    word-break: break-all;
+}
+
+.eg-drawer-close { flex: none; margin-top: 2px; }
+
+.eg-drawer-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--eg-border);
+    overflow-x: auto;
+}
+
+.eg-tab {
+    appearance: none;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--eg-text-3);
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 10px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.14s ease, border-color 0.14s ease;
+    margin-bottom: -1px;
+}
+
+.eg-tab:hover { color: var(--eg-text); }
+
+.eg-tab.on {
+    color: var(--eg-primary);
+    border-bottom-color: var(--eg-primary);
+}
+
+.eg-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.eg-drawer-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 20px;
+    border-top: 1px solid var(--eg-border);
+    background: var(--eg-surface);
+}
+
+.eg-drawer-foot-btns { display: flex; gap: 8px; }
+
+/* ---------- 表单栅格（抽屉 / 设置页共用） ---------- */
+
+.eg-form-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 1fr;
+}
+
+.eg-form-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.eg-form-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+.eg-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.eg-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--eg-text-3);
+    margin-bottom: 6px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.eg-hint {
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+    line-height: 1.5;
+    margin-top: 6px;
+}
+
+/* 行内开关字段：开关 + 文字横排，底部对齐输入框基线 */
+.eg-field-switch {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 5px;
+}
+
+.eg-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--eg-text-3);
+    line-height: 1.5;
+}
+
+/* 键值对映射行：来源 → 目标 + 移除 */
+.eg-maprows { display: flex; flex-direction: column; gap: 8px; }
+
+.eg-maprow {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.eg-maprow-arrow {
+    color: var(--eg-text-3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+}
+
+/* 表格内的等宽弱色单元 / 等宽数字单元 */
+.eg-mono-dim {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.eg-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 侧栏折叠（html[data-rail="collapsed"]，由 eg.js 切换） ----------
+   全局规则：scoped CSS 无法命中 <html> 属性选择器，只能放这里。
+   选择器特意写得比 NavMenu.razor.css 的 scoped 规则更重，确保覆盖。 */
+
+@media (min-width: 641px) {
+    html[data-rail="collapsed"] .page .sidebar { width: 64px; }
+
+    html[data-rail="collapsed"] .page .sidebar .brand-text,
+    html[data-rail="collapsed"] .page .sidebar .nav-section,
+    html[data-rail="collapsed"] .page .sidebar .nav-label,
+    html[data-rail="collapsed"] .page .sidebar .nav-version {
+        display: none !important;
     }
 
-    [data-theme="dark"] code { background: var(--eg-primary-soft); color: #aab4ff; }
+    html[data-rail="collapsed"] .page .sidebar .brand-row { padding: 16px 10px 14px; }
 
-    [data-theme="dark"] .eg-logo-preview { background: #262a3a; }
+    html[data-rail="collapsed"] .page .sidebar .navbar-brand { justify-content: center; }
 
-    [data-theme="dark"] .eg-compbar { background: #262a3a; }
-
-    [data-theme="dark"] .progress { background: #262a3a; }
-
-    [data-theme="dark"] .bg-secondary { background: #2a2f40 !important; color: var(--eg-text-2) !important; }
-    [data-theme="dark"] .bg-light { background: #232736 !important; color: var(--eg-text-2) !important; }
-
-    [data-theme="dark"] .btn-outline-secondary:hover { background: #232736; }
-
-    [data-theme="dark"] .alert-info { background: var(--eg-info-soft); border-color: #1c3a4d; color: #7cc8ee; }
-    [data-theme="dark"] .alert-warning { background: var(--eg-warning-soft); border-color: #4d3d17; color: #e8c56b; }
-    [data-theme="dark"] .alert-danger { background: var(--eg-danger-soft); border-color: #57302f; color: #f0a2a2; }
-
-    [data-theme="dark"] .btn-secondary { background: #2a2f40; border-color: #383d50; color: var(--eg-text); }
-
-    [data-theme="dark"] .modal-content { background: var(--eg-surface); color: var(--eg-text); }
-
-    [data-theme="dark"] .form-control, [data-theme="dark"] .form-select {
-        background: #12141c;
-        color: var(--eg-text);
-        border-color: var(--eg-border-strong);
+    html[data-rail="collapsed"] .page .sidebar .nav-link {
+        justify-content: center;
+        padding: 0;
     }
 
-        [data-theme="dark"] .form-control::placeholder { color: var(--eg-text-3); }
+        html[data-rail="collapsed"] .page .sidebar .nav-link .menu-icon { margin-right: 0; }
 
-    [data-theme="dark"] .dropdown-menu { background: var(--eg-surface); border-color: var(--eg-border-strong); }
-    [data-theme="dark"] .dropdown-item { color: var(--eg-text-2); }
-        [data-theme="dark"] .dropdown-item:hover { background: #232736; color: var(--eg-text); }
+        /* 折叠态选中条竖条居中到底部太长，保持右端即可，隐藏更干净 */
+        html[data-rail="collapsed"] .page .sidebar .nav-link.active::after { content: none; }
 
-    [data-theme="dark"] pre.bg-light, [data-theme="dark"] pre { background: #0d0f16 !important; color: #c8d0e4; }
-
-    [data-theme="dark"] .eg-service-state { background: #1e2230 !important; }
-
-    [data-theme="dark"] .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
-
-    [data-theme="dark"] .text-muted { color: var(--eg-text-3) !important; }
+    html[data-rail="collapsed"] .page .sidebar .nav-footer { justify-content: center; padding: 10px 8px; }
+}

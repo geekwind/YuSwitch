@@ -1,56 +1,50 @@
-.eg-logtable {
-    table-layout: fixed;
+/* 调用日志：CSS Grid 表格列模板 */
+.log-table {
+    --eg-gt-cols: 84px minmax(170px, 1.4fr) 120px 56px 116px 64px 76px 76px 36px;
+    --eg-gt-min: 900px;
 }
 
-    .eg-logtable td {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-.eg-logrow {
+/* 新日志提示条：视口不在顶部/非首页时替代自动前插，避免内容跳动 */
+.log-newbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 8px 14px;
+    margin-bottom: 10px;
+    background: var(--eg-primary-soft);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius);
+    color: var(--eg-text-2);
+    font-size: 0.86rem;
+    text-align: left;
     cursor: pointer;
 }
 
-    .eg-logrow.open > td {
-        background: var(--eg-primary-soft);
-        border-bottom: none;
-    }
+    .log-newbar:hover { border-color: var(--eg-primary); }
 
-/* 调用链路：别名与真实模型各占一行，避免长模型名撑宽列 */
-.eg-chain-stack {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-    max-width: 100%;
-    min-width: 0;
+    .log-newbar strong { color: var(--eg-accent-text); }
+
+.log-newbar-hint { color: var(--eg-text-3); font-size: 0.78rem; }
+
+/* 网格单元允许收缩 / 截断（默认 min-width:auto 会撑列） */
+.log-table .eg-grow > span { min-width: 0; }
+
+/* 展开行：accent 极淡底，与下方详情面板视觉相连 */
+.log-table .eg-grow.open {
+    background: var(--eg-primary-soft);
+    border-bottom: none;
 }
 
-    /* fixed 布局下列宽固定，超长模型名在行内截断而不是撑出列 */
-    .eg-chain-stack code {
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
+.log-caret { color: var(--eg-text-3); font-size: 11px; }
 
-.eg-chain-real {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    max-width: 100%;
-    min-width: 0;
+/* 展开详情：整宽块（替代原 colspan=9 的 tr/td），与行同滚动宽度 */
+.eg-logdetail2 {
+    min-width: var(--eg-gt-min);
+    background: var(--eg-surface-2);
+    border-bottom: 1px solid var(--eg-border);
+    padding: 14px 16px 16px;
 }
-
-    .eg-chain-real .eg-chain-arrow {
-        flex: none;
-    }
-
-    .eg-chain-real code {
-        flex: 0 1 auto;
-        min-width: 0;
-    }
 
 /* Tokens：P/C 一行，合计一行 */
 .eg-tok {
@@ -73,19 +67,7 @@
     font-size: 0.9em;
 }
 
-
-.eg-chain-up {
-    background: var(--eg-info-soft);
-    color: var(--eg-info) !important;
-}
-
-.eg-logdetail > td {
-    background: #fafbfd;
-    border-top: none;
-    padding: 0.9rem 1.1rem 1.1rem;
-    white-space: normal;
-}
-
+/* 详情区：两栏 Prompt/Response + 元信息 */
 .eg-detail-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -107,7 +89,7 @@
 }
 
 .eg-detail-box {
-    background: var(--eg-surface);
+    background: var(--eg-input);
     border: 1px solid var(--eg-border);
     border-radius: var(--eg-radius-sm);
     padding: 0.6rem 0.75rem;

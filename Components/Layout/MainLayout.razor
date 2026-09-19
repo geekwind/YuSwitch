@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject AppSettingsService Settings
+@inject NavigationManager Nav
 @inject IJSRuntime JS
 @using Microsoft.JSInterop
 @implements IDisposable
@@ -10,23 +11,20 @@
     </div>
 
     <main>
-        <div class="top-row px-4">
-            <button class="eg-theme-toggle" title="@(isDark ? "切换到亮色" : "切换到暗色")" @onclick="ToggleTheme">
-                @if (isDark)
-                {
-                    @* sun *@
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                }
-                else
-                {
-                    @* moon *@
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                }
+        <div class="top-row">
+            <span class="eg-crumb">@Crumb</span>
+            <span class="flex-fill"></span>
+            <span class="eg-status-pill" title="网关监听地址">
+                <span class="dot"></span>
+                网关运行中 · <span class="eg-mono">@Settings.ListenHost:@Settings.ListenPort</span>
+            </span>
+            <RealtimeStatus />
+            <button class="eg-theme-toggle" title="@(isDark ? "切换到浅色" : "切换到深色")" @onclick="ToggleTheme">
+                <Icon Name="@(isDark ? "sun" : "moon")" Size="14" />
             </button>
-            <span class="eg-topbar-badge"><span class="dot"></span> @Settings.AppName · @Settings.Subtitle</span>
         </div>
 
-        <article class="content px-4">
+        <article class="content">
             @Body
         </article>
     </main>
@@ -41,11 +39,45 @@
 </div>
 
 @code {
-    private bool isDark;
+    // Dark is the product default; OnAfterRender syncs the real value anyway.
+    private bool isDark = true;
 
-    protected override void OnInitialized() => Settings.Changed += OnSettingsChanged;
+    protected override void OnInitialized()
+    {
+        Settings.Changed += OnSettingsChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
     private void OnSettingsChanged() => InvokeAsync(StateHasChanged);
-    public void Dispose() => Settings.Changed -= OnSettingsChanged;
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Settings.Changed -= OnSettingsChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    // 面包屑：分组 / 页面（与侧栏分组一致）
+    private string Crumb
+    {
+        get
+        {
+            var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/');
+            return path switch
+            {
+                "" => "总览 / 仪表盘",
+                "services" => "配置 / 服务管理",
+                "apikeys" => "配置 / API Key",
+                "playground" => "观测 / 接口测试",
+                "usage" => "观测 / 用量统计",
+                "logs" => "观测 / 调用日志",
+                "dispatch-trace" => "观测 / 路由追踪",
+                "realtime" => "观测 / 实时订阅",
+                "settings" => "系统 / 设置",
+                _ => path,
+            };
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

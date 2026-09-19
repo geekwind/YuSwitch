@@ -3,6 +3,20 @@ using System.Collections.Concurrent;
 namespace YuSwitch.Services;
 
 /// <summary>
+/// A single usage-log row riding along with a "new-log" notification. Carries
+/// everything the log list needs to render the row, so live views can prepend
+/// it without a follow-up query. Field set mirrors the admin call-logs
+/// projection (AdminEndpoints.GetCallLogs).
+/// </summary>
+public record NewLogItem(
+    DateTime Timestamp, string ApiKey, string Model, string UpstreamModel,
+    string Provider, string Service, bool Success, string StatusCode,
+    int PromptTokens, int CompletionTokens, int TotalTokens, int ReasoningTokens,
+    int CacheCreationTokens, int CacheReadTokens, bool CacheHit,
+    long LatencyMs, long TtftMs, bool Stream,
+    string PromptPreview, string ResponsePreview, string Error);
+
+/// <summary>
 /// Notification context that carries optional metadata about the event.
 /// Allows pages to make intelligent decisions about whether to refresh.
 /// </summary>
@@ -12,6 +26,10 @@ public class NotificationContext
     public string? Service { get; set; }
     public string? Provider { get; set; }
     public Dictionary<string, string>? Metadata { get; set; }
+
+    /// <summary>Rows that arrived during the debounce window (oldest → newest).
+    /// Set on flushed "new-log" notifications; null for signal-only events.</summary>
+    public List<NewLogItem>? NewLogs { get; set; }
 }
 
 /// <summary>
@@ -40,7 +58,14 @@ public class RealtimeNotificationService
     private readonly ConcurrentDictionary<string, HashSet<string>> _subscriptions = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, Action<NotificationContext?>>> _callbacks = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastBroadcastTime = new();
-    private readonly ConcurrentDictionary<string, System.Threading.Timer?> _debounceTimers = new();
+    // Debounce state: at most ONE delayed flush task per message type. Late
+    // broadcasts within the window just move _lastBroadcastTime and enqueue
+    // their context — no per-call Timer allocation/disposal on the hot path.
+    private readonly ConcurrentDictionary<string, byte> _flushPending = new();
+    // Contexts queued during the current window. A queue (not a single slot):
+    // flushed payloads must carry EVERY row that arrived, not just the last one
+    // — live views prepend them one by one.
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<NotificationContext?>> _pendingBatch = new();
 
     // Cross-tab sync: user key -> set of connection IDs (tabs) for that user
     private readonly ConcurrentDictionary<string, HashSet<string>> _userConnections = new();
@@ -185,34 +210,88 @@ public class RealtimeNotificationService
     }
 
     /// <summary>
-    /// Broadcast with context for smart filtering.
+    /// Broadcast with context for smart filtering. Debounced per message type:
+    /// bursts collapse into a single flush carrying every context queued during
+    /// the window (see <see cref="MergeBatch"/>).
     /// </summary>
     public void Broadcast(string messageType, NotificationContext? context = null, int debounceMs = DefaultDebounceMs)
     {
         if (string.IsNullOrEmpty(messageType))
             return;
 
-        _lastBroadcastTime.AddOrUpdate(messageType, DateTime.UtcNow, (k, v) => DateTime.UtcNow);
+        _lastBroadcastTime[messageType] = DateTime.UtcNow;
+        _pendingBatch.GetOrAdd(messageType, _ => new ConcurrentQueue<NotificationContext?>()).Enqueue(context);
 
-        if (_debounceTimers.TryGetValue(messageType, out var existingTimer))
+        // A flush task is already waiting for this type — it will pick up the
+        // updated time/queue above. Only the first broadcast in a window
+        // schedules one.
+        if (!_flushPending.TryAdd(messageType, 0))
+            return;
+
+        _ = Task.Run(async () =>
         {
-            existingTimer?.Dispose();
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(debounceMs);
+                    var last = _lastBroadcastTime.TryGetValue(messageType, out var t) ? t : DateTime.MinValue;
+                    if ((DateTime.UtcNow - last).TotalMilliseconds >= debounceMs - 50)
+                        break;
+                }
+                // Clear the gate BEFORE draining: a broadcast landing in between
+                // then schedules a fresh flush instead of assuming this one
+                // covers it, so a late context can never be stranded.
+                _flushPending.TryRemove(messageType, out _);
+                _pendingBatch.TryRemove(messageType, out var queue);
+                var merged = MergeBatch(queue);
+                if (merged is not null)
+                    InvokeCallbacks(messageType, merged);
+            }
+            finally
+            {
+                _flushPending.TryRemove(messageType, out _);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Upper bound on rows carried by one flushed batch. A sustained burst can't
+    /// grow the payload without limit; the oldest rows are dropped because live
+    /// views only ever prepend the newest ones.
+    /// </summary>
+    private const int MaxBatchLogs = 500;
+
+    /// <summary>
+    /// Collapse the contexts queued during a debounce window into one. Scalar
+    /// fields come from the newest context (existing consumers read them as
+    /// "what just happened"), while NewLogs is the concatenation of every
+    /// window entry in arrival order.
+    /// </summary>
+    private static NotificationContext? MergeBatch(ConcurrentQueue<NotificationContext?>? queue)
+    {
+        if (queue is null || queue.IsEmpty)
+            return null;
+
+        var queued = queue.ToArray();
+        var latest = queued.LastOrDefault(c => c is not null);
+
+        List<NewLogItem>? logs = null;
+        foreach (var c in queued)
+        {
+            if (c?.NewLogs is { Count: > 0 } items)
+                (logs ??= new()).AddRange(items);
         }
 
-        var capturedContext = context;
-        var timer = new System.Threading.Timer(_ =>
-        {
-            if (_lastBroadcastTime.TryGetValue(messageType, out var lastTime))
-            {
-                var elapsed = (DateTime.UtcNow - lastTime).TotalMilliseconds;
-                if (elapsed >= debounceMs - 50)
-                {
-                    InvokeCallbacks(messageType, capturedContext);
-                }
-            }
-        }, null, debounceMs, System.Threading.Timeout.Infinite);
+        if (logs is not null && logs.Count > MaxBatchLogs)
+            logs.RemoveRange(0, logs.Count - MaxBatchLogs);
 
-        _debounceTimers.AddOrUpdate(messageType, timer, (k, v) => { v?.Dispose(); return timer; });
+        if (latest is null)
+            return logs is null ? null : new NotificationContext { NewLogs = logs };
+
+        if (logs is not null)
+            latest.NewLogs = logs;
+        return latest;
     }
 
     /// <summary>

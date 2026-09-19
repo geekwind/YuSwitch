@@ -1,6 +1,9 @@
 @page "/dispatch-trace"
 @inject HttpClient Http
+@inject ToastService Toasts
+@inject RealtimeNotificationService Notifications
 @using YuSwitch.Services
+@implements IDisposable
 
 <PageTitle>路由追踪</PageTitle>
 
@@ -11,19 +14,19 @@
     </div>
     <div class="d-flex gap-3 align-items-center">
         <RealtimeStatus />
-        <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@loading">
-            @if (loading) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@refreshing">
+            @if (refreshing) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
         </button>
     </div>
 </div>
 
-<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-    <label class="small text-muted mb-0">模型</label>
-    <select class="form-select form-select-sm" style="width:240px" value="@modelFilter" @onchange="OnModelChange">
+<div class="trace-toolbar">
+    <label class="trace-filter-label">模型</label>
+    <select class="form-select form-select-sm trace-model-select" value="@modelFilter" @onchange="OnModelChange">
         <option value="">全部模型</option>
         @foreach (var m in modelOptions) { <option value="@m">@m</option> }
     </select>
-    <small class="text-muted">仅显示最近 @PageSize 条记录</small>
+    <span class="trace-note">仅显示最近 @PageSize 条记录</span>
 </div>
 
 @if (loading)
@@ -43,62 +46,75 @@ else if (logs is null || logs.Count == 0)
 }
 else
 {
-    <div class="eg-table-card">
-        <table class="table table-hover table-sm align-middle mb-0">
-            <thead>
-                <tr>
-                    <th style="width:88px">时间</th>
-                    <th>API Key</th>
-                    <th>模型 (别名 → 上游)</th>
-                    <th style="width:110px">服务</th>
-                    <th style="width:120px" class="text-end">Tokens (提示/回复)</th>
-                    <th style="width:90px" class="text-end">延迟(ms)</th>
-                    <th style="width:80px" class="text-end">TTFB(ms)</th>
-                    <th style="width:56px">状态</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var l in logs)
-                {
-                    <tr>
-                        <td><small>@FormatTime(l.timestamp)</small></td>
-                        <td><small>@Dash(l.apiKey)</small></td>
-                        <td>
-                            <span class="eg-chain">
-                                <code>@l.model</code>
-                                @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
-                                {
-                                    <span class="eg-chain-arrow">→</span>
-                                    <code>@l.upstreamModel</code>
-                                }
-                            </span>
-                        </td>
-                        <td><small>@Dash(l.service)</small></td>
-                        <td class="text-end"><small>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens)</small></td>
-                        <td class="text-end"><small>@UiFormat.N(l.latencyMs)</small></td>
-                        <td class="text-end"><small>@(l.ttftMs > 0 ? UiFormat.N(l.ttftMs) : "-")</small></td>
-                        <td>
-                            @if (l.success) { <span class="badge bg-success">成功</span> }
-                            else { <span class="badge bg-danger">@l.statusCode</span> }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+    <div class="eg-gtable trace-table">
+        <div class="eg-gthead">
+            <span>时间</span>
+            <span>API Key</span>
+            <span>模型 (别名 → 上游)</span>
+            <span>服务</span>
+            <span class="text-end">Tokens P/C</span>
+            <span class="text-end">延迟(ms)</span>
+            <span class="text-end">TTFB(ms)</span>
+            <span>状态</span>
+        </div>
+        @foreach (var l in logs)
+        {
+            <div class="eg-grow">
+                <span class="eg-mono-dim">@FormatTime(l.timestamp)</span>
+                <span class="eg-mono-dim">@Dash(l.apiKey)</span>
+                <span class="eg-chain2">
+                    <span class="eg-chain2-alias">@l.model</span>
+                    @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
+                    {
+                        <span class="eg-chain2-up">↳ @l.upstreamModel</span>
+                    }
+                </span>
+                <span class="eg-mono-dim">@Dash(l.service)</span>
+                <span class="text-end eg-num">@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens)</span>
+                <span class="text-end eg-num">@UiFormat.N(l.latencyMs)</span>
+                <span class="text-end eg-num">@(l.ttftMs > 0 ? UiFormat.N(l.ttftMs) : "-")</span>
+                <span>
+                    @if (l.success) { <span class="badge bg-success">成功</span> }
+                    else { <span class="badge bg-danger">@l.statusCode</span> }
+                </span>
+            </div>
+        }
     </div>
 }
 
 @code {
     private const int PageSize = 50;
 
+    // Live refresh throttle: a burst of requests must not re-query the trace
+    // list on every event.
+    private const int MinRefreshIntervalMs = 2000;
+
     private List<CallLog>? logs;
     private List<string> modelOptions = new();
     private string modelFilter = "";
     private bool loading = true;
+    private bool refreshing;
     private bool loadError;
+    private bool _errorNotified;
+    private string? _circuitId;
+    private DateTime _lastLoadAt = DateTime.MinValue;
+    private Action<NotificationContext?>? _refreshCallback;
 
     protected override async Task OnInitializedAsync()
     {
+        _circuitId = Guid.NewGuid().ToString("N");
+        _refreshCallback = (context) => InvokeAsync(async () =>
+        {
+            if ((DateTime.UtcNow - _lastLoadAt).TotalMilliseconds < MinRefreshIntervalMs)
+                return;
+            // Only refresh when the new rows are relevant to the active filter.
+            if (!string.IsNullOrEmpty(modelFilter) && context?.NewLogs is { Count: > 0 } batch &&
+                !batch.Any(l => string.Equals(l.Model, modelFilter, StringComparison.OrdinalIgnoreCase)))
+                return;
+            await LoadAsync();
+        });
+        Notifications.Subscribe(_circuitId, "new-log", _refreshCallback);
+
         // Populate the model dropdown from the same filters endpoint the shared
         // filter bar uses; a failure only means an empty dropdown, not an error.
         try
@@ -111,6 +127,14 @@ else
         await LoadAsync();
     }
 
+    public void Dispose()
+    {
+        if (!string.IsNullOrEmpty(_circuitId))
+        {
+            Notifications.Unsubscribe(_circuitId, "new-log");
+        }
+    }
+
     private Task OnModelChange(ChangeEventArgs e)
     {
         modelFilter = e.Value?.ToString() ?? "";
@@ -119,23 +143,45 @@ else
 
     private async Task LoadAsync()
     {
-        loading = true;
+        // Skeleton for the first paint only: live refreshes swap the rows in
+        // place so the list never blanks out.
+        var firstLoad = logs is null;
+        if (firstLoad)
+        {
+            loading = true;
+            StateHasChanged();
+        }
+        refreshing = true;
         loadError = false;
-        StateHasChanged();
         var qs = $"?limit={PageSize}&offset=0&model={Uri.EscapeDataString(modelFilter)}" +
-                 $"&service=&provider=&status=&q=";
+                 "&service=&provider=&status=&q=";
         try
         {
             var result = await Http.GetFromJsonAsync<CallLogPage>("/admin/call-logs" + qs);
             logs = result?.items ?? new();
+            _errorNotified = false;
         }
         catch
         {
-            // Distinguish "endpoint failed" from "genuinely no data".
-            logs = new();
-            loadError = true;
+            // A refresh failure keeps the rows already on screen; only the first
+            // load has nothing to show, so only it becomes an error state.
+            if (firstLoad)
+            {
+                logs = new();
+                loadError = true;
+            }
+            else if (!_errorNotified)
+            {
+                _errorNotified = true;   // one toast per outage, not one per event
+                Toasts.Error("路由数据刷新失败，当前显示最近一次成功的数据。");
+            }
         }
+        _lastLoadAt = DateTime.UtcNow;
         loading = false;
+        refreshing = false;
+        // Event-driven refreshes aren't DOM event handlers, so nothing renders
+        // automatically after the awaits — render the fresh rows explicitly.
+        StateHasChanged();
     }
 
     // ISO "yyyy-MM-ddTHH:mm:ss..." → HH:mm:ss

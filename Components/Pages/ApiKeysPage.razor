@@ -13,7 +13,7 @@
         <h1 class="eg-title">API Key 管理</h1>
         <p class="eg-sub">客户端凭此 Key 接入网关</p>
     </div>
-    <button class="btn btn-primary" @onclick="OpenCreate">+ 新建 Key</button>
+    <button class="btn btn-primary" @onclick="OpenCreate"><Icon Name="plus" Size="14" /> 新建 Key</button>
 </div>
 
 <div class="card mb-4">
@@ -22,37 +22,35 @@
         <small class="text-muted">客户端使用下面的地址 + API Key 接入网关</small>
     </div>
     <div class="card-body py-2">
-        <table class="table table-sm align-middle mb-2">
-            <tbody>
-                <tr>
-                    <td style="width:160px">OpenAI 兼容</td>
-                    <td><code>@(BaseUrl)v1/chat/completions</code></td>
-                    <td class="text-muted small">Header: <code>Authorization: Bearer &lt;Key&gt;</code></td>
-                    <td style="width:70px"><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/chat/completions"))">复制</button></td>
-                </tr>
-                <tr>
-                    <td>Anthropic 兼容</td>
-                    <td><code>@(BaseUrl)v1/messages</code></td>
-                    <td class="text-muted small">Header: <code>x-api-key: &lt;Key&gt;</code></td>
-                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/messages"))">复制</button></td>
-                </tr>
-                <tr>
-                    <td>模型列表</td>
-                    <td><code>@(BaseUrl)v1/models</code></td>
-                    <td class="text-muted small">GET，同 OpenAI 鉴权</td>
-                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1/models"))">复制</button></td>
-                </tr>
-                <tr>
-                    <td>SDK Base URL</td>
-                    <td><code>@(BaseUrl)v1</code></td>
-                    <td class="text-muted small">OpenAI/Anthropic SDK 的 <code>base_url</code></td>
-                    <td><button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Copy($"{BaseUrl}v1"))">复制</button></td>
-                </tr>
-            </tbody>
-        </table>
-        <details>
+        <div class="eg-endpoints">
+            <div class="eg-ep-row">
+                <span class="eg-ep-label">OpenAI 兼容</span>
+                <code class="eg-ep-url">@(BaseUrl)v1/chat/completions</code>
+                <span class="eg-ep-header">Authorization: Bearer &lt;Key&gt;</span>
+                <button class="eg-btn-icon" title="复制地址" @onclick="@(() => Copy($"{BaseUrl}v1/chat/completions"))"><Icon Name="copy" Size="13" /></button>
+            </div>
+            <div class="eg-ep-row">
+                <span class="eg-ep-label">Anthropic 兼容</span>
+                <code class="eg-ep-url">@(BaseUrl)v1/messages</code>
+                <span class="eg-ep-header">x-api-key: &lt;Key&gt;</span>
+                <button class="eg-btn-icon" title="复制地址" @onclick="@(() => Copy($"{BaseUrl}v1/messages"))"><Icon Name="copy" Size="13" /></button>
+            </div>
+            <div class="eg-ep-row">
+                <span class="eg-ep-label">模型列表</span>
+                <code class="eg-ep-url">@(BaseUrl)v1/models</code>
+                <span class="eg-ep-header">GET，同 OpenAI 鉴权</span>
+                <button class="eg-btn-icon" title="复制地址" @onclick="@(() => Copy($"{BaseUrl}v1/models"))"><Icon Name="copy" Size="13" /></button>
+            </div>
+            <div class="eg-ep-row">
+                <span class="eg-ep-label">SDK Base URL</span>
+                <code class="eg-ep-url">@(BaseUrl)v1</code>
+                <span class="eg-ep-header">OpenAI/Anthropic SDK 的 base_url</span>
+                <button class="eg-btn-icon" title="复制地址" @onclick="@(() => Copy($"{BaseUrl}v1"))"><Icon Name="copy" Size="13" /></button>
+            </div>
+        </div>
+        <details class="eg-ep-curl">
             <summary class="text-muted small" style="cursor:pointer">curl 示例</summary>
-            <pre class="bg-light border rounded p-2 mt-2 mb-0 small">curl @(BaseUrl)v1/chat/completions \
+            <pre class="mb-0 small mt-2">curl @(BaseUrl)v1/chat/completions \
   -H "Authorization: Bearer &lt;你的Key&gt;" \
   -H "Content-Type: application/json" \
   -d '{"model":"&lt;模型名&gt;","messages":[{"role":"user","content":"你好"}]}'</pre>
@@ -70,37 +68,30 @@ else if (keys.Count == 0)
 }
 else
 {
-    <div class="eg-table-card">
-    <table class="table table-hover align-middle">
-        <thead>
-            <tr><th>ID</th><th>名称</th><th>Key</th><th>允许模型</th><th>限制</th><th>状态</th><th>操作</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var k in keys)
-            {
-                <tr>
-                    <td>@k.Id</td>
-                    <td>@k.Name</td>
-                    <td><code class="text-truncate d-inline-block" style="max-width:200px">@Mask(k.KeyValue)</code></td>
-                    <td><small class="text-muted">@Truncate(k.AllowedModels, 40)</small></td>
-                    <td><small class="text-muted">@LimitSummary(k)</small></td>
-                    <td>
-                        <div class="form-check form-switch mb-0" title="@(k.Enabled ? "点击停用" : "点击启用")">
-                            <input class="form-check-input" type="checkbox" role="switch"
-                                   checked="@k.Enabled" @onchange="() => ToggleKey(k)" />
-                        </div>
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => Copy(k.KeyValue)">复制</button>
-                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenEdit(k)">编辑</button>
-                        <button class="btn btn-sm btn-outline-success me-1" title="一键配置本地 Claude Code 使用此 Key" @onclick="() => Wire(k, WireTarget.Claude)">配 Claude</button>
-                        <button class="btn btn-sm btn-outline-success me-1" title="一键配置本地 Codex 使用此 Key" @onclick="() => Wire(k, WireTarget.Codex)">配 Codex</button>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteKey(k.Id)">删除</button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <div class="eg-gtable key-table">
+        <div class="eg-gthead">
+            <span>ID</span><span>名称</span><span>Key</span><span>允许模型</span><span>限制</span><span>状态</span><span class="text-end">操作</span>
+        </div>
+        @foreach (var k in keys)
+        {
+            <div class="eg-grow">
+                <span class="eg-mono-dim">@k.Id</span>
+                <span class="key-name" title="@k.Name">@k.Name</span>
+                <code class="key-val">@Mask(k.KeyValue)</code>
+                <span class="eg-mono-dim">@Truncate(k.AllowedModels, 40)</span>
+                <span class="eg-mono-dim">@LimitSummary(k)</span>
+                <span>
+                    <button type="button" class="eg-switch @(k.Enabled ? "on" : "")" title="@(k.Enabled ? "点击停用" : "点击启用")" @onclick="() => ToggleKey(k)"><span class="eg-switch-knob"></span></button>
+                </span>
+                <span class="key-actions">
+                    <button class="eg-btn-icon" title="复制 Key" @onclick="() => Copy(k.KeyValue)"><Icon Name="copy" Size="13" /></button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(k)">编辑</button>
+                    <button class="btn btn-sm btn-outline-secondary" title="一键配置本地 Claude Code 使用此 Key" @onclick="() => Wire(k, WireTarget.Claude)">配 Claude</button>
+                    <button class="btn btn-sm btn-outline-secondary" title="一键配置本地 Codex 使用此 Key" @onclick="() => Wire(k, WireTarget.Codex)">配 Codex</button>
+                    <button class="eg-btn-icon eg-btn-danger" title="删除" @onclick="() => DeleteKey(k.Id)"><Icon Name="trash" Size="13" /></button>
+                </span>
+            </div>
+        }
     </div>
 }
 

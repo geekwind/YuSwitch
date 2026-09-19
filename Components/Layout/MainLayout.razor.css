@@ -12,79 +12,98 @@ main {
 }
 
 .sidebar {
-    background: linear-gradient(180deg, var(--eg-side-1) 0%, var(--eg-side-2) 100%);
+    background: var(--eg-side-1);
+    border-right: 1px solid var(--eg-border);
 }
 
+/* 顶栏：52px sticky 毛玻璃 */
 .top-row {
-    background: var(--eg-surface);
+    background: var(--eg-bar);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--eg-border);
-    justify-content: flex-end;
-    height: 3.4rem;
+    height: 52px;
     display: flex;
     align-items: center;
+    gap: 14px;
+    padding: 0 28px;
 }
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
+    .top-row .eg-crumb {
+        font-size: 12px;
+        color: var(--eg-text-3);
+        font-family: 'JetBrains Mono', monospace;
         white-space: nowrap;
-        margin-left: 1.5rem;
-        text-decoration: none;
-    }
-
-        .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
-            text-decoration: underline;
-        }
-
-    .top-row ::deep a:first-child {
         overflow: hidden;
         text-overflow: ellipsis;
     }
 
-.top-row .eg-topbar-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    color: var(--eg-text-2);
-}
+    .top-row .flex-fill { flex: 1; }
 
-.top-row .eg-theme-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    margin-right: 0.9rem;
-    border: 1px solid var(--eg-border);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--eg-text-2);
-    cursor: pointer;
-}
-
-    .top-row .eg-theme-toggle:hover {
-        color: var(--eg-text);
-        border-color: var(--eg-border-strong);
+    /* 网关状态药丸：7px 绿点 + 光圈 */
+    .top-row .eg-status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        color: var(--eg-text-2);
+        padding: 4px 10px;
+        border: 1px solid var(--eg-border);
+        border-radius: 99px;
+        white-space: nowrap;
     }
 
-    .top-row .eg-topbar-badge .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--eg-success);
-        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+        .top-row .eg-status-pill .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--eg-success);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--eg-success) 20%, transparent);
+        }
+
+        .top-row .eg-status-pill .eg-mono { font-family: 'JetBrains Mono', monospace; }
+
+    .top-row .eg-theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        flex: none;
+        border: 1px solid var(--eg-border);
+        border-radius: 7px;
+        background: transparent;
+        color: var(--eg-text-2);
+        cursor: pointer;
+        transition: color 0.14s ease, border-color 0.14s ease;
+    }
+
+        .top-row .eg-theme-toggle:hover {
+            color: var(--eg-primary);
+            border-color: var(--eg-primary);
+        }
+
+    /* 顶栏里的实时状态行 */
+    .top-row ::deep .eg-realtime-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--eg-text-3);
+        white-space: nowrap;
     }
 
 @media (max-width: 640.98px) {
-    .top-row { justify-content: space-between; }
+    .top-row { padding: 0 14px; gap: 8px; }
 
-        .top-row ::deep a, .top-row ::deep .btn-link { margin-left: 0; }
+        .top-row .eg-status-pill { display: none; }
 }
 
 @media (min-width: 641px) {
     .page { flex-direction: row; }
 
     .sidebar {
-        width: 250px;
+        width: 218px;
         height: 100vh;
         position: sticky;
         top: 0;
@@ -98,17 +117,6 @@ main {
     .top-row {
         position: sticky;
         top: 0;
-        z-index: 1;
+        z-index: 20;
     }
-
-        .top-row.auth ::deep a:first-child {
-            flex: 1;
-            text-align: right;
-            width: 0;
-        }
-
-        .top-row, article {
-            padding-left: 2.25rem !important;
-            padding-right: 2.25rem !important;
-        }
 }

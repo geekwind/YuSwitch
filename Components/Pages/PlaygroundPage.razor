@@ -3,7 +3,7 @@
 @inject IJSRuntime JS
 @using Microsoft.AspNetCore.Components.Forms
 
-<PageTitle>测试</PageTitle>
+<PageTitle>接口测试</PageTitle>
 
 <div class="eg-pagehead">
     <div>
@@ -12,119 +12,168 @@
     </div>
 </div>
 
-<div class="row g-3 mb-3">
-    <div class="col-md-3">
-        <label class="form-label">API Key</label>
-        <input class="form-control font-monospace" value="@apiKey" @oninput="e => apiKey = e.Value!.ToString()!" placeholder="sk-..." />
-    </div>
-    <div class="col-md-3">
-        <label class="form-label">模型</label>
-        <input class="form-control" value="@model" @oninput="e => model = e.Value!.ToString()!" placeholder="GLM-4-Flash" />
-    </div>
-    <div class="col-md-2">
-        <label class="form-label">协议</label>
-        <select class="form-select" value="@protocol" @onchange="e => protocol = e.Value!.ToString()!">
-            <option value="openai">OpenAI /v1/chat/completions</option>
-            <option value="anthropic">Anthropic /v1/messages</option>
-        </select>
-    </div>
-    <div class="col-md-1">
-        <label class="form-label">Max Tokens</label>
-        <input type="number" class="form-control" @bind="maxTokens" min="1" />
-    </div>
-    <div class="col-md-1 d-flex align-items-end">
-        <div class="form-check">
-            <input type="checkbox" id="stream" class="form-check-input" checked="@stream" @onchange="e => stream = (bool)e.Value!" />
-            <label class="form-check-label" for="stream">流式</label>
-        </div>
-    </div>
-    <div class="col-md-2 d-flex align-items-end">
-        <button class="btn btn-primary w-100" @onclick="Send" disabled="@busy">
-            @if (busy) { <span class="spinner-border spinner-border-sm"></span> } else { <text>发送</text> }
-        </button>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-md-8">
-        <label class="form-label">系统提示（System Prompt，可选）</label>
-        <textarea class="form-control" rows="2" value="@systemPrompt" @oninput="e => systemPrompt = e.Value!.ToString()!" placeholder="设置模型角色/系统指令，留空则忽略"></textarea>
-    </div>
-    <div class="col-md-2">
-        <label class="form-label">温度</label>
-        <input type="number" class="form-control" @bind="temperature" min="0" max="2" step="0.1" />
-    </div>
-    <div class="col-md-2 d-flex align-items-end">
-        <button class="btn btn-outline-secondary w-100" @onclick="ClearConversation" disabled="@busy">清空对话</button>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-md-4">
-        <div class="form-check mt-1">
-            <input type="checkbox" id="toolsToggle" class="form-check-input" checked="@enableTools" @onchange="e => enableTools = (bool)e.Value!" />
-            <label class="form-check-label" for="toolsToggle">启用函数调用（get_weather）</label>
-        </div>
-        <div class="text-muted small mt-1">请求会附带一个查询天气的工具定义。仅支持工具调用的模型可用。</div>
-    </div>
-    <div class="col-md-8">
-        <label class="form-label">图片（可选，仅附加到当前消息）</label>
-        <InputFile accept="image/*" OnChange="OnImageSelected" />
-        <div class="text-muted small mt-1">支持视觉输入的模型方可识别图片。</div>
-        @if (!string.IsNullOrEmpty(imageDataUrl))
-        {
-            <div class="mt-2 d-flex align-items-center gap-2">
-                <img src="@imageDataUrl" alt="图片预览" style="max-height:48px;max-width:48px;border-radius:4px;border:1px solid #dee2e6" />
-                <span class="text-muted small">@imageName</span>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearImage">移除</button>
+<div class="pg-layout">
+    @* 左：340px 配置面板 *@
+    <div class="pg-config">
+        <label class="eg-field">
+            <span class="eg-label">API Key</span>
+            <select class="form-select font-monospace" value="@selectedKeyId" @onchange="OnKeyChanged" disabled="@(keys.Count == 0)">
+                @if (keys.Count == 0)
+                {
+                    <option value="0">（无可用 Key）</option>
+                }
+                @foreach (var k in keys)
+                {
+                    <option value="@k.Id">@KeyLabel(k)</option>
+                }
+            </select>
+            @if (keys.Count == 0)
+            {
+                <span class="eg-hint">还没有启用的 API Key——先到 <a href="apikeys">API Key 页</a> 创建。</span>
+            }
+        </label>
+        <label class="eg-field">
+            <span class="eg-label">模型</span>
+            <select class="form-select" value="@model" @onchange="OnModelChanged" disabled="@(allowedModels.Count == 0)">
+                @if (allowedModels.Count == 0)
+                {
+                    <option value="">（无可用模型）</option>
+                }
+                @foreach (var m in allowedModels)
+                {
+                    <option value="@m.Name">@m.Name</option>
+                }
+            </select>
+            @if (keys.Count > 0 && allowedModels.Count == 0)
+            {
+                <span class="eg-hint">该 Key 的允许模型与当前服务配置没有交集——检查 Key 的模型白名单或服务的模型配置。</span>
+            }
+        </label>
+        <div class="eg-field">
+            <span class="eg-label">协议</span>
+            <div class="pg-segmented">
+                <button type="button" class="pg-seg @(protocol == "openai" ? "on" : "")" @onclick='() => protocol = "openai"'>OpenAI</button>
+                <button type="button" class="pg-seg @(protocol == "anthropic" ? "on" : "")" @onclick='() => protocol = "anthropic"'>Anthropic</button>
             </div>
-        }
-    </div>
-</div>
+        </div>
+        <div class="eg-form-grid cols-2">
+            <label class="eg-field">
+                <span class="eg-label">Max Tokens</span>
+                <input type="number" class="form-control" @bind="maxTokens" min="1" />
+            </label>
+            <label class="eg-field">
+                <span class="eg-label">温度</span>
+                <input type="number" class="form-control" @bind="temperature" min="0" max="2" step="0.1" />
+            </label>
+        </div>
+        <label class="eg-field">
+            <span class="eg-label">系统提示（System Prompt，可选）</span>
+            <textarea class="form-control" rows="3" value="@systemPrompt" @oninput="e => systemPrompt = e.Value!.ToString()!" placeholder="设置模型角色/系统指令，留空则忽略"></textarea>
+        </label>
 
-<div class="mb-3">
-    <label class="form-label">输入</label>
-    <textarea class="form-control" rows="3" value="@input" @oninput="e => input = e.Value!.ToString()!" placeholder="说点什么..."></textarea>
-</div>
+        <div class="pg-switches">
+            <div class="pg-switch-row">
+                <button type="button" class="eg-switch @(stream ? "on" : "")" @onclick='() => stream = !stream'><span class="eg-switch-knob"></span></button>
+                <span>流式输出</span>
+            </div>
+            <div class="pg-switch-row">
+                <button type="button" class="eg-switch @(enableTools ? "on" : "")" @onclick='() => enableTools = !enableTools'><span class="eg-switch-knob"></span></button>
+                <span>函数调用（get_weather）</span>
+            </div>
+        </div>
 
-@if (!string.IsNullOrEmpty(reasoning))
-{
-    <details class="mb-2" open="@string.IsNullOrEmpty(response)">
-        <summary class="text-muted small" style="cursor:pointer">思考过程 (@reasoning.Length 字符)</summary>
-        <pre class="border rounded p-2 bg-light text-muted small mt-1" style="white-space:pre-wrap;max-height:240px;overflow-y:auto">@reasoning</pre>
-    </details>
-}
-
-@if (toolCalls.Count > 0)
-{
-    <div class="mb-2">
-        <label class="form-label">工具调用（tool calls）</label>
-        <pre class="border rounded p-2 bg-light small font-monospace" style="white-space:pre-wrap;max-height:240px;overflow-y:auto">@RenderToolCalls()</pre>
-    </div>
-}
-
-<div>
-    <label class="form-label">响应 @(string.IsNullOrEmpty(finishReason) ? "" : $"(finish: {finishReason})")</label>
-    <pre class="border rounded p-3 bg-light" style="min-height:120px;white-space:pre-wrap">@response</pre>
-    @if (done && string.IsNullOrEmpty(response) && toolCalls.Count == 0)
-    {
-        <div class="alert alert-warning py-2 small">
-            请求成功但没有正文输出。
-            @if (finishReason == "length" || !string.IsNullOrEmpty(reasoning))
+        <div class="eg-field">
+            <span class="eg-label">附加图片（仅当前消息）</span>
+            <InputFile accept="image/*" OnChange="OnImageSelected" class="form-control" disabled="@(!CurrentModelSupportsVision)" />
+            @if (!string.IsNullOrEmpty(imageDataUrl))
             {
-                <text>该模型是推理（thinking）模型，Max Tokens=@maxTokens 的配额被「思考过程」消耗完了——请调大 Max Tokens（建议 ≥1024）再试。</text>
+                <div class="pg-img-preview">
+                    <img src="@imageDataUrl" alt="预览" />
+                    <span class="eg-mono-dim">@imageName</span>
+                    <button type="button" class="eg-btn-icon eg-btn-danger" title="移除" @onclick="ClearImage"><Icon Name="x" Size="12" /></button>
+                </div>
             }
-            else
+            <span class="eg-hint">@(CurrentModelSupportsVision ? "支持视觉输入的模型方可识别图片。" : "当前模型未标记视觉能力，图片上传已禁用。")</span>
+        </div>
+
+        <div class="pg-config-actions">
+            <button class="btn btn-primary pg-send" @onclick="Send" disabled="@(busy || string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(model))">
+                @if (busy) { <span class="spinner-border spinner-border-sm"></span> } else { <Icon Name="paper-plane-right" Size="14" /> }
+                <span>发送</span>
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="ClearConversation" disabled="@busy">清空</button>
+        </div>
+    </div>
+
+    @* 右：结果区 *@
+    <div class="pg-result">
+        <div class="pg-input-row">
+            <label class="eg-field" style="flex:1">
+                <span class="eg-label">输入</span>
+                <textarea class="form-control" rows="3" value="@input" @oninput="e => input = e.Value!.ToString()!" placeholder="说点什么..."></textarea>
+            </label>
+        </div>
+
+        <div class="pg-meta">
+            @if (busy)
             {
-                <text>请检查调用日志中该请求的 finish_reason 与上游返回。</text>
+                <span class="eg-pill eg-pill-neutral"><span class="pg-pulse"></span>请求中…</span>
+            }
+            else if (done)
+            {
+                <span class="eg-pill eg-pill-ok"><span class="pg-dot-ok"></span>完成</span>
+            }
+            <span class="eg-pill eg-pill-outline">@(protocol == "openai" ? "OpenAI" : "Anthropic")</span>
+            <span class="eg-pill eg-pill-outline">@(stream ? "流式" : "非流式")</span>
+            @if (!string.IsNullOrEmpty(finishReason))
+            {
+                <span class="eg-pill eg-pill-outline">finish: @finishReason</span>
             }
         </div>
-    }
+
+        <div class="card pg-response-card">
+            <div class="card-header">响应 @(string.IsNullOrEmpty(finishReason) ? "" : $" · {finishReason}")</div>
+            <div class="card-body">
+                @if (!string.IsNullOrEmpty(reasoning))
+                {
+                    <details class="pg-reasoning" open="@string.IsNullOrEmpty(response)">
+                        <summary class="text-muted small" style="cursor:pointer">思考过程 (@reasoning.Length 字符)</summary>
+                        <pre class="pg-code">@reasoning</pre>
+                    </details>
+                }
+
+                @if (toolCalls.Count > 0)
+                {
+                    <div class="mb-2">
+                        <div class="eg-detail-label">工具调用（tool calls）</div>
+                        <pre class="pg-code pg-code-mono">@RenderToolCalls()</pre>
+                    </div>
+                }
+
+                <pre class="pg-response">@(string.IsNullOrEmpty(response) ? "（响应将显示在这里）" : response)</pre>
+
+                @if (done && string.IsNullOrEmpty(response) && toolCalls.Count == 0)
+                {
+                    <div class="alert alert-warning py-2 small">
+                        请求成功但没有正文输出。
+                        @if (finishReason == "length" || !string.IsNullOrEmpty(reasoning))
+                        {
+                            <text>该模型是推理（thinking）模型，Max Tokens=@maxTokens 的配额被「思考过程」消耗完了——请调大 Max Tokens（建议 ≥1024）再试。</text>
+                        }
+                        else
+                        {
+                            <text>请检查调用日志中该请求的 finish_reason 与上游返回。</text>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
 </div>
 
 @code {
-    private string apiKey = "sk-yuswitch-local";
-    private string model = "GLM-4-Flash";
+    private string apiKey = "";
+    private string model = "";
     private string protocol = "openai";
     private bool stream = true;
     private int maxTokens = 1024;
@@ -134,6 +183,111 @@
     private string finishReason = "";
     private bool busy;
     private bool done;
+
+    // Key/模型联动：Key 下拉来自 /admin/apikeys（仅启用的），模型下拉来自
+    // /admin/services 的启用模型（含别名），并按所选 Key 的 AllowedModels 过滤。
+    private List<ApiKeyDto> keys = new();
+    private List<ModelOption> allModels = new();
+    private List<ModelOption> allowedModels = new();
+    private int selectedKeyId;
+
+    private sealed class ApiKeyDto
+    {
+        public int Id { get; set; }
+        public string KeyValue { get; set; } = "";
+        public string Name { get; set; } = "";
+        public bool Enabled { get; set; }
+        public string AllowedModels { get; set; } = "*";
+    }
+
+    private sealed class ServiceDto
+    {
+        public bool Enabled { get; set; }
+        public List<ModelDto>? Models { get; set; }
+    }
+
+    private sealed class ModelDto
+    {
+        public string ModelName { get; set; } = "";
+        public string Aliases { get; set; } = "";
+        public bool Enabled { get; set; }
+        public bool SupportsVision { get; set; }
+    }
+
+    /// <summary>一个可路由的模型名（ModelName 或别名）+ 能力标记。</summary>
+    private sealed record ModelOption(string Name, bool Vision);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            keys = (await Http.GetFromJsonAsync<List<ApiKeyDto>>("/admin/apikeys"))
+                       ?.Where(k => k.Enabled).ToList() ?? new();
+            var services = await Http.GetFromJsonAsync<List<ServiceDto>>("/admin/services") ?? new();
+            allModels = BuildModelOptions(services);
+            if (keys.Count > 0)
+                ApplyKey(keys[0]);
+        }
+        catch
+        {
+            // 管理 API 读不到时保持空列表，下拉显示空态提示；发送会自然报错。
+        }
+    }
+
+    /// <summary>启用服务 × 启用模型 → 可路由名称（ModelName + 每个别名），去重保序。</summary>
+    private static List<ModelOption> BuildModelOptions(List<ServiceDto> services)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<ModelOption>();
+        foreach (var m in services.Where(s => s.Enabled).SelectMany(s => s.Models ?? new()).Where(m => m.Enabled))
+        {
+            if (seen.Add(m.ModelName))
+                result.Add(new ModelOption(m.ModelName, m.SupportsVision));
+            foreach (var a in m.Aliases.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (seen.Add(a))
+                    result.Add(new ModelOption(a, m.SupportsVision));
+        }
+        return result;
+    }
+
+    /// <summary>与 ApiKeyEntity.AllowsModel 同语义："*" 放行全部，否则按逗号列表精确匹配（不分大小写）。</summary>
+    private List<ModelOption> AllowedOptions(ApiKeyDto k)
+    {
+        if (k.AllowedModels.Trim() == "*") return allModels;
+        var set = k.AllowedModels.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                   .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return allModels.Where(m => set.Contains(m.Name)).ToList();
+    }
+
+    private void ApplyKey(ApiKeyDto k)
+    {
+        selectedKeyId = k.Id;
+        apiKey = k.KeyValue;
+        allowedModels = AllowedOptions(k);
+        // 联动：当前模型不在新 Key 的允许范围内时，落到第一个可选项。
+        if (!allowedModels.Any(m => m.Name == model))
+            model = allowedModels.FirstOrDefault()?.Name ?? "";
+    }
+
+    private void OnKeyChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id) && keys.FirstOrDefault(k => k.Id == id) is { } k)
+            ApplyKey(k);
+    }
+
+    private void OnModelChanged(ChangeEventArgs e) => model = e.Value?.ToString() ?? "";
+
+    /// <summary>当前选中模型是否标记了视觉能力（决定图片上传是否可用）。</summary>
+    private bool CurrentModelSupportsVision =>
+        allowedModels.FirstOrDefault(m => m.Name == model)?.Vision == true;
+
+    private static string KeyLabel(ApiKeyDto k)
+    {
+        var name = string.IsNullOrWhiteSpace(k.Name) ? "未命名" : k.Name;
+        var v = k.KeyValue;
+        var mask = v.Length <= 8 ? "****" : v[..3] + "****" + v[^4..];
+        return $"{name}（{mask}）";
+    }
 
     // 新增：系统提示 / 温度 / 多轮历史 / 工具调用 / 图片
     private string systemPrompt = "";
@@ -184,6 +338,7 @@
             // 失败时回滚刚追加的用户消息，避免历史中留下悬空 turn
             if (history.Count > 0) history.RemoveAt(history.Count - 1);
             response = "错误: " + ex.Message;
+            done = true;
         }
         finally
         {

@@ -16,7 +16,10 @@ public static class OpenAiEndpoints
 {
     public static IEndpointRouteBuilder MapOpenAiEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/v1");
+        // The permissive "Any" CORS policy applies ONLY to this gateway data
+        // plane (browser client apps call it cross-origin). The admin surface
+        // deliberately gets no CORS headers (see Program.cs).
+        var g = app.MapGroup("/v1").RequireCors("Any");
 
         g.MapPost("/chat/completions", HandleChatCompletion);
 
@@ -105,6 +108,12 @@ public static class OpenAiEndpoints
         catch (UpstreamException ex)
         {
             return UpstreamErrorPassthrough(ex);
+        }
+        catch (Exception ex)
+        {
+            // Unexpected (e.g. malformed upstream body → JsonException): still a
+            // JSON error — the Blazor /Error page must never leak onto the API.
+            return Error(500, ex.Message, "server_error");
         }
     }
 

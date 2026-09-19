@@ -28,12 +28,16 @@ public static class SseWriter
     public static async Task WriteChunkAsync(HttpResponse response, StreamChunk chunk, CancellationToken ct)
     {
         // Raw passthrough: no model-alias rewrite happened, so write the upstream
-        // `data:` payload bytes back verbatim (no re-serialization).
+        // `data:` payload bytes back verbatim (no re-serialization). Frame into
+        // ONE write — three separate WriteAsync calls per chunk triple the
+        // response-write overhead on high-frequency chunk streams.
         if (chunk.RawPayload is { Length: > 0 } raw)
         {
-            await response.WriteAsync("data: ", ct);
-            await response.Body.WriteAsync(raw, ct);
-            await response.WriteAsync("\n\n", ct);
+            var framed = new byte[raw.Length + 8]; // "data: " + raw + "\n\n"
+            "data: "u8.CopyTo(framed.AsSpan());
+            raw.CopyTo(framed.AsMemory(6));
+            "\n\n"u8.CopyTo(framed.AsSpan(6 + raw.Length));
+            await response.Body.WriteAsync(framed, ct);
         }
         else
         {

@@ -45,6 +45,19 @@ public class AdminAuthMiddleware
         // Gateway API and health probes are not admin surface.
         if (IsExemptPath(path)) { await _next(ctx); return; }
 
+        // Cross-site guard (drive-by localhost / CSRF). A page open in the
+        // operator's browser on ANOTHER origin must never reach the admin
+        // surface — even though its requests come from loopback (the browser
+        // is local, so the loopback bypass below would otherwise wave them
+        // through). Browsers mark such requests Sec-Fetch-Site: cross-site;
+        // older ones send an Origin whose host differs from ours. Requests
+        // with neither header (curl, scripts, same-origin navigation) pass.
+        if (IsCrossSiteBrowserRequest(ctx))
+        {
+            await Reject(ctx, 403, path, "已拒绝跨站请求：管理界面不接受来自其他网站的浏览器请求。");
+            return;
+        }
+
         // Loopback = the local user (or the server calling itself). Zero friction.
         if (IsLoopback(ctx)) { await _next(ctx); return; }
 
@@ -76,6 +89,9 @@ public class AdminAuthMiddleware
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Lax,
+                // HTTPS (TLS-terminating proxy) → Secure; plain HTTP dev → omit
+                // or the browser would drop the cookie entirely.
+                Secure = ctx.Request.IsHttps,
             });
         }
 
@@ -92,6 +108,22 @@ public class AdminAuthMiddleware
     private static bool IsLoopback(HttpContext ctx) =>
         ctx.Connection.RemoteIpAddress is { } ip &&
         (IPAddress.IsLoopback(ip) || (ip.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(ip.MapToIPv4())));
+
+    /// <summary>True for browser requests initiated by a different site:
+    /// Sec-Fetch-Site: cross-site (all modern browsers), or an Origin header
+    /// whose host:port isn't the request's own Host. "same-site"/"same-origin"
+    /// and header-less requests (curl, scripts) are not browser cross-site.</summary>
+    private static bool IsCrossSiteBrowserRequest(HttpContext ctx)
+    {
+        if (ctx.Request.Headers.TryGetValue("Sec-Fetch-Site", out var sfs) &&
+            sfs.ToString().Equals("cross-site", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var origin = ctx.Request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin)) return false;
+        return Uri.TryCreate(origin, UriKind.Absolute, out var o)
+            && !string.Equals(o.Authority, ctx.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? BearerToken(string auth) =>
         auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)

@@ -1,4 +1,4 @@
-﻿@page "/settings"
+@page "/settings"
 @inject HttpClient Http
 @inject IJSRuntime JS
 @inject AppSettingsService Settings
@@ -10,288 +10,352 @@
 <div class="eg-pagehead">
     <div>
         <h1 class="eg-title">设置</h1>
-        <p class="eg-sub">自定义软件名称、Logo 与外观信息</p>
+        <p class="eg-sub">自定义软件名称、Logo、网络与负载均衡等</p>
     </div>
 </div>
 
-<div class="card" style="max-width:680px">
-    <div class="card-header">基础信息</div>
-    <div class="card-body">
-        <div class="mb-3">
-            <label class="form-label">软件名称</label>
-            <input class="form-control" @bind="appName" placeholder="@AppSettingsService.DefaultAppName" />
-            <small class="text-muted">显示在侧栏、浏览器标题与桌面窗口标题上</small>
-        </div>
-        <div class="mb-4">
-            <label class="form-label">副标题 / 描述</label>
-            <input class="form-control" @bind="subtitle" placeholder="@AppSettingsService.DefaultSubtitle" />
-        </div>
+<div class="eg-settings">
+    <div class="eg-settings-tabs" role="tablist">
+        <button type="button" class="@TabClass("basic")" @onclick='() => activeTab = "basic"'>基础信息</button>
+        <button type="button" class="@TabClass("net")" @onclick='() => activeTab = "net"'>监听 · 网络</button>
+        <button type="button" class="@TabClass("update")" @onclick='() => activeTab = "update"'>检查更新</button>
+        <button type="button" class="@TabClass("websearch")" @onclick='() => activeTab = "websearch"'>联网搜索</button>
+        <button type="button" class="@TabClass("probe")" @onclick='() => activeTab = "probe"'>健康探测</button>
+        <button type="button" class="@TabClass("lb")" @onclick='() => activeTab = "lb"'>负载均衡 · 熔断</button>
+        <button type="button" class="@TabClass("backup")" @onclick='() => activeTab = "backup"'>配置备份</button>
+    </div>
 
-        <label class="form-label">Logo</label>
-        <div class="eg-logo-picker">
-            <label class="eg-logo-opt @(logoType == "auto" ? "active" : "")">
-                <input type="radio" name="logoType" checked="@(logoType == "auto")" @onchange='() => logoType = "auto"' />
-                <span class="eg-logo-preview eg-logo-auto">@BrandInitials</span>
-                <span class="eg-logo-name">默认字母</span>
-            </label>
-            <label class="eg-logo-opt @(logoType == "emoji" ? "active" : "")">
-                <input type="radio" name="logoType" checked="@(logoType == "emoji")" @onchange='() => logoType = "emoji"' />
-                <span class="eg-logo-preview">@(logoType == "emoji" && !string.IsNullOrEmpty(logoEmoji) ? logoEmoji : "😀")</span>
-                <span class="eg-logo-name">Emoji</span>
-            </label>
-            <label class="eg-logo-opt @(logoType == "image" ? "active" : "")">
-                <input type="radio" name="logoType" checked="@(logoType == "image")" @onchange='() => logoType = "image"' />
-                <span class="eg-logo-preview">
-                    @if (!string.IsNullOrEmpty(logoImage))
-                    { <img src="@logoImage" alt="logo" /> }
-                    else
-                    { <Icon Name="image" Size="20" /> }
-                </span>
-                <span class="eg-logo-name">上传图片</span>
-            </label>
-        </div>
+    <div class="eg-settings-body">
 
-        @if (logoType == "emoji")
+        @if (activeTab == "basic")
         {
-            <div class="mt-3">
-                <label class="form-label">选择一个 Emoji</label>
-                <input class="form-control" style="max-width:200px" @bind="logoEmoji" maxlength="4" placeholder="🚀" />
+        <section id="sec-basic" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">基础信息</div>
+                <div class="card-body">
+                    <div class="eg-form-grid cols-2">
+                        <label class="eg-field">
+                            <span class="eg-label">软件名称</span>
+                            <input class="form-control" @bind="appName" placeholder="@AppSettingsService.DefaultAppName" />
+                            <span class="eg-hint">显示在侧栏、浏览器标题与桌面窗口标题上</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">副标题 / 描述</span>
+                            <input class="form-control" @bind="subtitle" placeholder="@AppSettingsService.DefaultSubtitle" />
+                        </label>
+                    </div>
+
+                    <div class="eg-section-head"><span class="eg-label" style="margin:0">Logo</span></div>
+                    <div class="eg-logo-picker">
+                        <label class="eg-logo-opt @(logoType == "auto" ? "active" : "")">
+                            <input type="radio" name="logoType" checked="@(logoType == "auto")" @onchange='() => logoType = "auto"' />
+                            <span class="eg-logo-preview eg-logo-auto">@BrandInitials</span>
+                            <span class="eg-logo-name">默认字母</span>
+                        </label>
+                        <label class="eg-logo-opt @(logoType == "emoji" ? "active" : "")">
+                            <input type="radio" name="logoType" checked="@(logoType == "emoji")" @onchange='() => logoType = "emoji"' />
+                            <span class="eg-logo-preview">@(logoType == "emoji" && !string.IsNullOrEmpty(logoEmoji) ? logoEmoji : "😀")</span>
+                            <span class="eg-logo-name">Emoji</span>
+                        </label>
+                        <label class="eg-logo-opt @(logoType == "image" ? "active" : "")">
+                            <input type="radio" name="logoType" checked="@(logoType == "image")" @onchange='() => logoType = "image"' />
+                            <span class="eg-logo-preview">
+                                @if (!string.IsNullOrEmpty(logoImage))
+                                { <img src="@logoImage" alt="logo" /> }
+                                else
+                                { <Icon Name="image" Size="20" /> }
+                            </span>
+                            <span class="eg-logo-name">上传图片</span>
+                        </label>
+                    </div>
+
+                    @if (logoType == "emoji")
+                    {
+                        <label class="eg-field mt-3">
+                            <span class="eg-label">选择一个 Emoji</span>
+                            <input class="form-control" style="max-width:200px" @bind="logoEmoji" maxlength="4" placeholder="🚀" />
+                        </label>
+                    }
+                    else if (logoType == "image")
+                    {
+                        <label class="eg-field mt-3">
+                            <span class="eg-label">上传 Logo 图片（建议正方形 PNG，&lt;100KB）</span>
+                            <InputFile class="form-control" style="max-width:340px" OnChange="OnLogoFile" accept="image/*" />
+                        </label>
+                    }
+
+                    <div class="eg-drawer-foot" style="border-top:none;border-bottom:1px solid var(--eg-border);padding-left:0;padding-right:0;margin-top:20px">
+                        <span class="eg-hint">保存后立即更新界面外观</span>
+                        <span class="eg-drawer-foot-btns">
+                            <button class="btn btn-outline-secondary" @onclick="Reset" disabled="@saving">恢复默认</button>
+                            <button class="btn btn-primary" @onclick="Save" disabled="@saving">
+                                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+                            </button>
+                        </span>
+                    </div>
+                    @if (saved)
+                    {
+                        <div class="alert alert-info py-2 small mt-3 mb-0">已保存，界面已更新。</div>
+                    }
+                </div>
             </div>
+        </section>
         }
-        else if (logoType == "image")
+
+        @if (activeTab == "net")
         {
-            <div class="mt-3">
-                <label class="form-label">上传 Logo 图片（建议正方形 PNG，&lt;100KB）</label>
-                <InputFile class="form-control" style="max-width:340px" OnChange="OnLogoFile" accept="image/*" />
+        <section id="sec-net" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">监听 / 网络</div>
+                <div class="card-body">
+                    <div class="eg-form-grid cols-2">
+                        <label class="eg-field">
+                            <span class="eg-label">监听地址 <HelpIcon Text="网关绑定的网卡。localhost/127.0.0.1=仅本机；0.0.0.0 或 +=所有网卡（局域网可访问，需先设管理令牌）；或具体 IP。保存后需重启。" /></span>
+                            <input class="form-control" @bind="listenHost" placeholder="localhost" />
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">监听端口 <HelpIcon Text="1–65535，默认 5078。被占用时启动会提示。保存后需重启。" /></span>
+                            <input class="form-control" type="number" @bind="listenPort" placeholder="5078" />
+                        </label>
+                    </div>
+                    @if (HostIsNonLoopback)
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            非 <code>localhost</code> 地址会让网关对局域网开放。远程访问管理界面必须先设置下方的「管理令牌」，否则远程请求会被拒绝。
+                        </div>
+                    }
+                    <label class="eg-field">
+                        <span class="eg-label">管理令牌 (Admin Token) <HelpIcon Text="保护 /admin 与管理界面。本机访问始终免令牌；远程须携带 ?admin_token= 或 X-Admin-Token。留空=远程一律拒绝。保存后立即生效。" /></span>
+                        <div class="d-flex gap-2 align-items-start">
+                            <input class="form-control font-monospace" type="password"
+                                   @bind="adminToken" placeholder="@(adminTokenSet ? "已设置（留空保持不变）" : "未设置（本机访问无需令牌）")" />
+                            @if (adminTokenSet)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm" style="margin-top:1px" @onclick="ClearToken" disabled="@saving">清除令牌</button>
+                            }
+                        </div>
+                        <span class="eg-hint">
+                            保护 <code>/admin</code> 与管理界面。本机 (localhost) 访问始终无需令牌；设置后，远程访问需携带
+                            <code>?admin_token=令牌</code> 或 <code>X-Admin-Token</code> 请求头。未设置时，远程访问一律拒绝。
+                        </span>
+                    </label>
+                    <div class="alert alert-info py-2 small">
+                        监听地址与端口仅在启动时读取，<b>保存后需重启服务才能生效</b>。管理令牌保存后立即生效。
+                    </div>
+                    <div class="eg-drawer-foot" style="border-top:none;border-bottom:1px solid var(--eg-border);padding-left:0;padding-right:0">
+                        <span></span>
+                        <span class="eg-drawer-foot-btns">
+                            <button class="btn btn-primary" @onclick="Save" disabled="@(saving || restarting)">
+                                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+                            </button>
+                            <button class="btn btn-outline-primary" @onclick="Restart" disabled="@(saving || restarting)">
+                                @if (restarting) { <span class="spinner-border spinner-border-sm"></span> <text>重启中…</text> }
+                                else { <text>重启服务</text> }
+                            </button>
+                        </span>
+                    </div>
+                    @if (restartMsg != null)
+                    {
+                        <div class="alert alert-info py-2 small mt-3 mb-0">@restartMsg</div>
+                    }
+                </div>
             </div>
+        </section>
         }
 
-        <div class="d-flex gap-2 mt-4">
-            <button class="btn btn-primary" @onclick="Save" disabled="@saving">
-                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
-            </button>
-            <button class="btn btn-outline-secondary" @onclick="Reset" disabled="@saving">恢复默认</button>
-        </div>
-        @if (saved)
+        @if (activeTab == "update")
         {
-            <div class="alert alert-info py-2 small mt-3 mb-0">已保存，界面已更新。</div>
-        }
-    </div>
-</div>
-
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">监听 / 网络</div>
-    <div class="card-body">
-        <div class="mb-3">
-            <label class="form-label">监听地址 <HelpIcon Text="网关绑定的网卡。localhost/127.0.0.1=仅本机；0.0.0.0 或 +=所有网卡（局域网可访问，需先设管理令牌）；或具体 IP。保存后需重启。" /></label>
-            <input class="form-control" @bind="listenHost" placeholder="localhost" />
-            <small class="text-muted">网关绑定的网卡地址。可选：<code>localhost</code> / <code>127.0.0.1</code>（仅本机）、<code>0.0.0.0</code> 或 <code>+</code>（所有网卡）、或具体 IP。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">监听端口 <HelpIcon Text="1–65535，默认 5078。被占用时启动会提示。保存后需重启。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" @bind="listenPort" placeholder="5078" />
-            <small class="text-muted">1–65535。端口被其他程序占用时，启动会提示而不会打开页面。</small>
-        </div>
-        @if (HostIsNonLoopback)
-        {
-            <div class="alert alert-warning py-2 small">
-                非 <code>localhost</code> 地址会让网关对局域网开放。远程访问管理界面必须先设置下方的「管理令牌」，否则远程请求会被拒绝。
+        <section id="sec-update" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">检查更新</div>
+                <div class="card-body">
+                    <div class="eg-section-head">
+                        <span>当前版本 <code>v@(AppInfo.Version)</code></span>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+                        <button class="btn btn-primary" @onclick="CheckUpdate" disabled="@(updateChecking || updateApplying)">
+                            @if (updateChecking) { <span class="spinner-border spinner-border-sm"></span> <text>检查中…</text> }
+                            else { <text>检查更新</text> }
+                        </button>
+                        @if (updateAvailable)
+                        {
+                            <button class="btn btn-success" @onclick="ApplyUpdate" disabled="@(updateApplying)">
+                                @if (updateApplying) { <span class="spinner-border spinner-border-sm"></span> <text>更新中…</text> }
+                                else { <text>立即更新</text> }
+                            </button>
+                        }
+                    </div>
+                    @if (updateMsg != null)
+                    {
+                        <div class="alert @updateAlert py-2 small mt-3 mb-0" style="white-space:pre-line">@updateMsg</div>
+                    }
+                </div>
             </div>
+        </section>
         }
-        <div class="mb-3">
-            <label class="form-label">管理令牌 (Admin Token) <HelpIcon Text="保护 /admin 与管理界面。本机访问始终免令牌；远程须携带 ?admin_token= 或 X-Admin-Token。留空=远程一律拒绝。保存后立即生效。" /></label>
-            <div class="d-flex gap-2 align-items-start">
-                <input class="form-control font-monospace" style="max-width:420px" type="password"
-                       @bind="adminToken" placeholder="@(adminTokenSet ? "已设置（留空保持不变）" : "未设置（本机访问无需令牌）")" />
-                @if (adminTokenSet)
-                {
-                    <button class="btn btn-outline-secondary btn-sm mt-1" @onclick="ClearToken" disabled="@saving">清除令牌</button>
-                }
+
+        @if (activeTab == "websearch")
+        {
+        <section id="sec-websearch" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">联网搜索</div>
+                <div class="card-body">
+                    <label class="eg-field">
+                        <span class="eg-label">全局 Tavily API Key</span>
+                        <div class="d-flex gap-2 align-items-start">
+                            <input class="form-control font-monospace" type="password"
+                                   @bind="wsTavilyKey" placeholder="@(wsTavilyKeySet ? "已设置（留空保持不变）" : "未设置（留空则禁用网关侧联网搜索）")" />
+                            @if (wsTavilyKeySet)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm" style="margin-top:1px" @onclick="ClearWsKey" disabled="@saving">清除</button>
+                            }
+                        </div>
+                        <span class="eg-hint">
+                            网关侧联网搜索默认使用此 Key（Tavily）；服务可在「服务 → 编辑 → 联网搜索」里按服务覆盖。留空且服务未配置自己的 Key 时，<code>web_search</code> 工具会被剥离、不执行搜索。
+                        </span>
+                    </label>
+                </div>
             </div>
-            <small class="text-muted">
-                保护 <code>/admin</code> 与管理界面。本机 (localhost) 访问始终无需令牌；设置后，远程访问需携带
-                <code>?admin_token=令牌</code> 或 <code>X-Admin-Token</code> 请求头。未设置时，远程访问一律拒绝。
-            </small>
-        </div>
-        <div class="alert alert-info py-2 small mb-3">
-            监听地址与端口仅在启动时读取，<b>保存后需重启服务才能生效</b>。管理令牌保存后立即生效。
-        </div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-            <button class="btn btn-primary" @onclick="Save" disabled="@(saving || restarting)">
-                @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
-            </button>
-            <button class="btn btn-outline-primary" @onclick="Restart" disabled="@(saving || restarting)">
-                @if (restarting) { <span class="spinner-border spinner-border-sm"></span> <text>重启中…</text> }
-                else { <text>重启服务</text> }
-            </button>
-        </div>
-        @if (restartMsg != null)
-        {
-            <div class="alert alert-info py-2 small mt-3 mb-0">@restartMsg</div>
+        </section>
         }
-    </div>
-</div>
 
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">检查更新</div>
-    <div class="card-body">
-        <div class="mb-2">
-            当前版本 <code>v@(AppInfo.Version)</code>
-        </div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-            <button class="btn btn-primary" @onclick="CheckUpdate" disabled="@(updateChecking || updateApplying)">
-                @if (updateChecking) { <span class="spinner-border spinner-border-sm"></span> <text>检查中…</text> }
-                else { <text>检查更新</text> }
-            </button>
-            @if (updateAvailable)
-            {
-                <button class="btn btn-success" @onclick="ApplyUpdate" disabled="@(updateApplying)">
-                    @if (updateApplying) { <span class="spinner-border spinner-border-sm"></span> <text>更新中…</text> }
-                    else { <text>立即更新</text> }
-                </button>
-            }
-        </div>
-        @if (updateMsg != null)
+        @if (activeTab == "probe")
         {
-            <div class="alert @updateAlert py-2 small mt-3 mb-0" style="white-space:pre-line">@updateMsg</div>
-        }
-    </div>
-</div>
-
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">联网搜索</div>
-    <div class="card-body">
-        <div class="mb-3">
-            <label class="form-label">全局 Tavily API Key</label>
-            <div class="d-flex gap-2 align-items-start">
-                <input class="form-control font-monospace" style="max-width:420px" type="password"
-                       @bind="wsTavilyKey" placeholder="@(wsTavilyKeySet ? "已设置（留空保持不变）" : "未设置（留空则禁用网关侧联网搜索）")" />
-                @if (wsTavilyKeySet)
-                {
-                    <button class="btn btn-outline-secondary btn-sm mt-1" @onclick="ClearWsKey" disabled="@saving">清除</button>
-                }
+        <section id="sec-probe" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">健康探测</div>
+                <div class="card-body">
+                    <div class="eg-field-switch" style="margin-bottom:10px">
+                        <input class="form-check-input" type="checkbox" role="switch" id="probeEnabled" @bind="probeEnabled" />
+                        <label class="form-check-label" for="probeEnabled" style="margin:0">启用主动健康探测</label>
+                        <HelpIcon Text="后台定时探测所有启用服务的连通性（优先用免费的 /models，否则发 1 token 测试请求，会消耗少量上游调用）。" />
+                    </div>
+                    <p class="eg-hint" style="margin-top:0">
+                        后台定时检测所有启用服务的连通性（优先用免费的 /models 接口，否则发 1 token 测试请求），
+                        结果显示在仪表盘「服务实时状态」。长期无流量的坏渠道无需等真实请求即可发现。
+                    </p>
+                    <label class="eg-field">
+                        <span class="eg-label">探测间隔（秒） <HelpIcon Text="30–86400，默认 300（5 分钟）。保存后立即生效，无需重启。" /></span>
+                        <input class="form-control" style="max-width:200px" type="number" min="30" max="86400" @bind="probeIntervalS" />
+                        <span class="eg-hint">30–86400，默认 300（5 分钟）。</span>
+                    </label>
+                    <button class="btn btn-primary mt-2" @onclick="SaveProbe" disabled="@saving">
+                        @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+                    </button>
+                </div>
             </div>
-            <small class="text-muted">
-                网关侧联网搜索默认使用此 Key（Tavily）；服务可在「服务 → 编辑 → 联网搜索」里按服务覆盖。留空且服务未配置自己的 Key 时，<code>web_search</code> 工具会被剥离、不执行搜索。
-            </small>
-        </div>
-    </div>
-</div>
-
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">健康探测</div>
-    <div class="card-body">
-        <div class="form-check form-switch mb-2">
-            <input class="form-check-input" type="checkbox" role="switch" id="probeEnabled" @bind="probeEnabled" />
-            <label class="form-check-label" for="probeEnabled">启用主动健康探测</label>
-            <HelpIcon Text="后台定时探测所有启用服务的连通性（优先用免费的 /models，否则发 1 token 测试请求，会消耗少量上游调用）。" />
-        </div>
-        <p class="text-muted small mb-3">
-            后台定时检测所有启用服务的连通性（优先用免费的 /models 接口，否则发 1 token 测试请求），
-            结果显示在仪表盘「服务实时状态」。长期无流量的坏渠道无需等真实请求即可发现。
-        </p>
-        <div class="mb-3">
-            <label class="form-label">探测间隔（秒） <HelpIcon Text="30–86400，默认 300（5 分钟）。保存后立即生效，无需重启。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="30" max="86400" @bind="probeIntervalS" />
-            <small class="text-muted">30–86400，默认 300（5 分钟）。保存后立即生效，无需重启。</small>
-        </div>
-        <button class="btn btn-primary" @onclick="SaveProbe" disabled="@saving">
-            @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
-        </button>
-    </div>
-</div>
-
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">负载均衡 / 熔断调优</div>
-    <div class="card-body">
-        <p class="text-muted small mb-3">
-            自适应负载均衡与熔断参数，保存后立即生效，无需重启。数值会按服务端允许范围自动修正。
-        </p>
-        <div class="mb-3">
-            <label class="form-label">EWMA 平滑系数 <HelpIcon Text="0.01–1，默认 0.3。越大越偏向近期延迟（对突发波动更敏感）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" step="0.01" min="0.01" max="1" @bind="lbEwmaAlpha" />
-            <small class="text-muted">0.01–1，默认 0.3。越大越倾向近期延迟。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">熔断失败阈值 <HelpIcon Text="连续硬失败达到该次数即熔断（1–100，默认 3）。429 不计入硬失败。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="1" max="100" @bind="breakerFailureThreshold" />
-            <small class="text-muted">连续硬失败达到该次数后熔断（1–100，默认 3）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">熔断冷却基数（秒） <HelpIcon Text="首次冷却秒数，后续按 ×1 / ×3 / ×6 递增、上限 300（1–3600，默认 10）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="1" max="3600" @bind="breakerCooldownBaseS" />
-            <small class="text-muted">首次冷却时长，后续按 ×1 / ×3 / ×6 递增（1–3600，默认 10）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">429 惩罚（毫秒） <HelpIcon Text="429 窗口内对该渠道的附加评分扣分（0–1000000，默认 400）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="0" max="1000000" @bind="breaker429PenaltyMs" />
-            <small class="text-muted">429 窗口内对该渠道的附加扣分（0–1000000，默认 400）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">429 窗口（秒） <HelpIcon Text="一次 429 影响评分的时长（1–3600，默认 30）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="1" max="3600" @bind="breaker429WindowS" />
-            <small class="text-muted">一次 429 影响评分的时长（1–3600，默认 30）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">在途惩罚（毫秒） <HelpIcon Text="每个进行中请求的附加扣分，用于避免扎堆（0–1000000，默认 500）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="0" max="1000000" @bind="inFlightPenaltyMs" />
-            <small class="text-muted">每个在途请求附加的扣分，用于避免扎堆（0–1000000，默认 500）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">EWMA 衰减（秒） <HelpIcon Text="延迟回归基线的时间常数 τ（0.1–3600，默认 4）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" step="0.1" min="0.1" max="3600" @bind="ewmaDecayS" />
-            <small class="text-muted">延迟回归基线的时间常数 τ（0.1–3600，默认 4）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">渠道粘性系数 <HelpIcon Text="优先继续用上次成功的渠道，除非其评分超过最优渠道的该倍数才切换（保留上游 prompt cache）。1=关闭粘性（1–100，默认 2）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" step="0.1" min="1" max="100" @bind="lbStickyFactor" />
-            <small class="text-muted">优先继续使用上次成功的渠道，除非其评分超过最优渠道的该倍数才切换（保留上游 prompt cache）。1 = 关闭粘性（1–100，默认 2）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">默认请求超时（秒） <HelpIcon Text="服务未单独设置超时时使用的上游请求超时（5–3600，默认 120）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="5" max="3600" @bind="requestTimeoutDefaultS" />
-            <small class="text-muted">服务未单独设置超时时使用的上游请求超时（5–3600，默认 120）。</small>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">日志保留天数 <HelpIcon Text="调用日志保留天数（1–365，默认 30）。" /></label>
-            <input class="form-control" style="max-width:200px" type="number" min="1" max="365" @bind="usageLogRetentionDays" />
-            <small class="text-muted">调用日志保留天数（1–365，默认 30）。</small>
-        </div>
-        <div class="form-check form-switch mb-4">
-            <input class="form-check-input" type="checkbox" role="switch" id="rateLimitEnabled" @bind="rateLimitEnabled" />
-            <label class="form-check-label" for="rateLimitEnabled">启用速率限制</label>
-            <HelpIcon Text="总开关：开启后各服务的 QPS/QPM/并发 才会生效；关闭则全部不限。" />
-        </div>
-        <button class="btn btn-primary" @onclick="SaveTuning" disabled="@saving">
-            @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
-        </button>
-    </div>
-</div>
-
-<div class="card mt-4" style="max-width:680px">
-    <div class="card-header">配置备份</div>
-    <div class="card-body">
-        <p class="text-muted small mb-3">
-            导出全部服务、模型与 API Key 为 JSON 文件（含上游密钥明文，请妥善保管）；
-            导入为增量合并：同名服务、相同 Key 值会跳过，不会覆盖现有配置。
-        </p>
-        <div class="d-flex gap-2 align-items-center flex-wrap">
-            <button class="btn btn-outline-primary" @onclick="ExportConfig" disabled="@exporting">
-                @if (exporting) { <span class="spinner-border spinner-border-sm"></span> } else { <text>导出配置</text> }
-            </button>
-            <label class="btn btn-outline-secondary mb-0">
-                导入配置
-                <InputFile OnChange="ImportConfig" accept=".json" style="display:none" />
-            </label>
-        </div>
-        @if (importMsg != null)
-        {
-            <div class="alert alert-info py-2 small mt-3 mb-0">@importMsg</div>
+        </section>
         }
+
+        @if (activeTab == "lb")
+        {
+        <section id="sec-lb" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">负载均衡 / 熔断调优</div>
+                <div class="card-body">
+                    <p class="eg-hint">
+                        自适应负载均衡与熔断参数，保存后立即生效，无需重启。数值会按服务端允许范围自动修正。
+                    </p>
+                    <div class="eg-tuning-grid">
+                        <label class="eg-field">
+                            <span class="eg-label">EWMA 平滑系数 <HelpIcon Text="0.01–1，默认 0.3。越大越偏向近期延迟（对突发波动更敏感）。" /></span>
+                            <input class="form-control" type="number" step="0.01" min="0.01" max="1" @bind="lbEwmaAlpha" />
+                            <span class="eg-range">0.01–1</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">熔断失败阈值 <HelpIcon Text="连续硬失败达到该次数即熔断（1–100，默认 3）。429 不计入硬失败。" /></span>
+                            <input class="form-control" type="number" min="1" max="100" @bind="breakerFailureThreshold" />
+                            <span class="eg-range">1–100</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">熔断冷却基数（秒） <HelpIcon Text="首次冷却秒数，后续按 ×1 / ×3 / ×6 递增、上限 300（1–3600，默认 10）。" /></span>
+                            <input class="form-control" type="number" min="1" max="3600" @bind="breakerCooldownBaseS" />
+                            <span class="eg-range">1–3600</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">429 惩罚（毫秒） <HelpIcon Text="429 窗口内对该渠道的附加评分扣分（0–1000000，默认 400）。" /></span>
+                            <input class="form-control" type="number" min="0" max="1000000" @bind="breaker429PenaltyMs" />
+                            <span class="eg-range">0–1×10⁶</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">429 窗口（秒） <HelpIcon Text="一次 429 影响评分的时长（1–3600，默认 30）。" /></span>
+                            <input class="form-control" type="number" min="1" max="3600" @bind="breaker429WindowS" />
+                            <span class="eg-range">1–3600</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">在途惩罚（毫秒） <HelpIcon Text="每个进行中请求的附加扣分，用于避免扎堆（0–1000000，默认 500）。" /></span>
+                            <input class="form-control" type="number" min="0" max="1000000" @bind="inFlightPenaltyMs" />
+                            <span class="eg-range">0–1×10⁶</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">EWMA 衰减（秒） <HelpIcon Text="延迟回归基线的时间常数 τ（0.1–3600，默认 4）。" /></span>
+                            <input class="form-control" type="number" step="0.1" min="0.1" max="3600" @bind="ewmaDecayS" />
+                            <span class="eg-range">0.1–3600</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">渠道粘性系数 <HelpIcon Text="优先继续用上次成功的渠道，除非其评分超过最优渠道的该倍数才切换（保留上游 prompt cache）。1=关闭粘性（1–100，默认 2）。" /></span>
+                            <input class="form-control" type="number" step="0.1" min="1" max="100" @bind="lbStickyFactor" />
+                            <span class="eg-range">1–100</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">默认请求超时（秒） <HelpIcon Text="服务未单独设置超时时使用的上游请求超时（5–3600，默认 120）。" /></span>
+                            <input class="form-control" type="number" min="5" max="3600" @bind="requestTimeoutDefaultS" />
+                            <span class="eg-range">5–3600</span>
+                        </label>
+                        <label class="eg-field">
+                            <span class="eg-label">日志保留天数 <HelpIcon Text="调用日志保留天数（1–365，默认 30）。" /></span>
+                            <input class="form-control" type="number" min="1" max="365" @bind="usageLogRetentionDays" />
+                            <span class="eg-range">1–365</span>
+                        </label>
+                    </div>
+                    <div class="eg-field-switch" style="margin:14px 0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="rateLimitEnabled" @bind="rateLimitEnabled" />
+                        <label class="form-check-label" for="rateLimitEnabled" style="margin:0">启用速率限制</label>
+                        <HelpIcon Text="总开关：开启后各服务的 QPS/QPM/并发 才会生效；关闭则全部不限。" />
+                    </div>
+                    <button class="btn btn-primary" @onclick="SaveTuning" disabled="@saving">
+                        @if (saving) { <span class="spinner-border spinner-border-sm"></span> } else { <text>保存</text> }
+                    </button>
+                </div>
+            </div>
+        </section>
+        }
+
+        @if (activeTab == "backup")
+        {
+        <section id="sec-backup" class="eg-settings-card">
+            <div class="card">
+                <div class="card-header">配置备份</div>
+                <div class="card-body">
+                    <p class="eg-hint">
+                        导出全部服务、模型与 API Key 为 JSON 文件（含上游密钥明文，请妥善保管）；
+                        导入为增量合并：同名服务、相同 Key 值会跳过，不会覆盖现有配置。
+                    </p>
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <button class="btn btn-outline-primary" @onclick="ExportConfig" disabled="@exporting">
+                            @if (exporting) { <span class="spinner-border spinner-border-sm"></span> } else { <text>导出配置</text> }
+                        </button>
+                        <label class="btn btn-outline-secondary mb-0">
+                            导入配置
+                            <InputFile OnChange="ImportConfig" accept=".json" style="display:none" />
+                        </label>
+                    </div>
+                    @if (importMsg != null)
+                    {
+                        <div class="alert alert-info py-2 small mt-3 mb-0">@importMsg</div>
+                    }
+                </div>
+            </div>
+        </section>
+        }
+
     </div>
 </div>
 
 @code {
+    private string activeTab = "basic";
+    private string TabClass(string tab) => "eg-settings-tab" + (activeTab == tab ? " active" : "");
+
     private string appName = "";
     private string subtitle = "";
     private string logoType = "auto";

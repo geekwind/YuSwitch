@@ -1,7 +1,6 @@
 @using System.Text.Json
 @inject HttpClient Http
 @inject RealtimeNotificationService Notifications
-@inject IHttpContextAccessor HttpContextAccessor
 @implements IDisposable
 
 @if (loading)
@@ -18,7 +17,7 @@ else
         @foreach (var svc in serviceStates.OrderByDescending(s => s.inFlight))
         {
             var statusClass = svc.breakerOpen ? "text-danger" : (svc.ewmaMs < 200 ? "text-success" : "text-warning");
-            <div class="eg-service-state small mb-1" style="padding:4px 8px;background:#f8f9fa;border-radius:4px;">
+            <div class="eg-service-state small mb-2" style="padding:8px 10px;background:var(--eg-surface-2);border:1px solid var(--eg-border-soft);border-radius:var(--eg-radius);">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="fw-600">@svc.name</span>
                     <span>
@@ -53,19 +52,33 @@ else
     private string? _connectionId;
     private const int RefreshIntervalMs = 5000;
     private readonly CancellationTokenSource _disposeCts = new();
+    private bool _prevEnabled = true;
+
+    /// <summary>Bound to the host page's auto-refresh switch: when off, neither
+    /// the fallback poll nor the service-state events touch this card.</summary>
+    [Parameter] public bool Enabled { get; set; } = true;
 
     protected override async Task OnInitializedAsync()
     {
-        _connectionId = HttpContextAccessor?.HttpContext?.Connection.Id;
+        _connectionId = Guid.NewGuid().ToString("N");
         await LoadStatesAsync();
 
         if (!string.IsNullOrEmpty(_connectionId))
         {
             Notifications.Subscribe(_connectionId, "service-state", _ => InvokeAsync(async () =>
             {
+                if (!Enabled) return;
                 await LoadStatesAsync();
             }));
         }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Re-enabled: catch up immediately instead of waiting for the next tick.
+        if (Enabled && !_prevEnabled)
+            _ = InvokeAsync(LoadStatesAsync);
+        _prevEnabled = Enabled;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -82,6 +95,7 @@ else
                     await Task.Delay(RefreshIntervalMs, _disposeCts.Token);
                     await InvokeAsync(async () =>
                     {
+                        if (!Enabled) return;
                         await LoadStatesAsync();
                     });
                 }
@@ -120,7 +134,9 @@ else
         }
         catch
         {
-            serviceStates = new();
+            // Keep the last good snapshot on a transient failure — an empty card
+            // would read as "no services configured".
+            serviceStates ??= new();
             loading = false;
         }
         StateHasChanged();

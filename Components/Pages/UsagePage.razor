@@ -1,7 +1,7 @@
 @page "/usage"
 @inject HttpClient Http
+@inject ToastService Toasts
 @inject RealtimeNotificationService Notifications
-@inject IHttpContextAccessor HttpContextAccessor
 @using YuSwitch.Services
 @implements IDisposable
 
@@ -122,15 +122,15 @@ else if (stats is not null)
                             @for (var gi = 1; gi <= 3; gi++)
                             {
                                 var gy = Pad + (ChartH - Pad - BottomPad) * gi / 4.0;
-                                <line x1="@Pad" y1="@F(gy)" x2="@(ChartW - Pad)" y2="@F(gy)" stroke="#eef0f6" stroke-width="1" />
+                                <line x1="@Pad" y1="@F(gy)" x2="@(ChartW - Pad)" y2="@F(gy)" style="stroke:var(--eg-grid);stroke-width:1" />
                             }
-                            <path d="@AreaPath(reqPts)" fill="#4f46e5" fill-opacity="0.08" />
-                            <path d="@LinePath(reqPts)" fill="none" stroke="#4f46e5" stroke-width="2.2" stroke-linecap="round" />
+                            <path d="@AreaPath(reqPts)" style="fill:var(--eg-chart-1);fill-opacity:0.12" />
+                            <path d="@LinePath(reqPts)" fill="none" style="stroke:var(--eg-chart-1);stroke-width:2.2" stroke-linecap="round" />
                             @if (hourly.Any(h => h.Failed > 0))
                             {
-                                <path d="@LinePath(failPts)" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="4 3" />
+                                <path d="@LinePath(failPts)" fill="none" style="stroke:var(--eg-chart-3);stroke-width:1.6" stroke-dasharray="4 3" />
                             }
-                            <line x1="@Pad" y1="@(ChartH - BottomPad)" x2="@(ChartW - Pad)" y2="@(ChartH - BottomPad)" stroke="#e2e5ee" stroke-width="1" />
+                            <line x1="@Pad" y1="@(ChartH - BottomPad)" x2="@(ChartW - Pad)" y2="@(ChartH - BottomPad)" style="stroke:var(--eg-border-soft);stroke-width:1" />
                             @for (var i = 0; i < hourly.Count; i += Math.Max(1, hourly.Count / 6))
                             {
                                 @AxisLabel(F(X(i)), ChartH - 8, hourly[i].Hour)
@@ -169,6 +169,7 @@ else if (stats is not null)
     private List<HourlyBucket>? hourly;
     private bool loading = true;
     private bool loadError;
+    private bool _errorNotified;
     private UsageFilterBar.FilterValues filter = new(24, "", "", "", "", "");
     private List<(double x, double y)> reqPts = new();
     private List<(double x, double y)> failPts = new();
@@ -180,7 +181,7 @@ else if (stats is not null)
 
     protected override async Task OnInitializedAsync()
     {
-        _circuitId = HttpContextAccessor?.HttpContext?.Connection.Id;
+        _circuitId = Guid.NewGuid().ToString("N");
 
         _refreshCallback = (context) => InvokeAsync(async () =>
         {
@@ -205,6 +206,15 @@ else if (stats is not null)
             return true;
 
         if (context is null) return true;
+
+        // A debounced batch can hold rows for several models/services — refresh
+        // if ANY of them matches (the batch's scalar fields only describe the
+        // newest row, which would miss the rest).
+        if (context.NewLogs is { Count: > 0 } batch)
+            return batch.Any(l =>
+                (string.IsNullOrEmpty(filter.Model) || l.Model.Contains(filter.Model, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrEmpty(filter.Service) || l.Service.Contains(filter.Service, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrEmpty(filter.Provider) || l.Provider.Contains(filter.Provider, StringComparison.OrdinalIgnoreCase)));
 
         // Check if notification matches current filters
         bool matchesModel = string.IsNullOrEmpty(filter.Model) ||
@@ -231,9 +241,15 @@ else if (stats is not null)
 
     private async Task LoadAsync()
     {
-        loading = true;
+        // Skeleton for the first paint only: live refreshes swap the numbers in
+        // place so the page never blanks out.
+        var firstLoad = stats is null;
+        if (firstLoad)
+        {
+            loading = true;
+            StateHasChanged();
+        }
         loadError = false;
-        StateHasChanged();
         var qs = $"?hours={filter.Hours}&model={Uri.EscapeDataString(filter.Model)}" +
                  $"&service={Uri.EscapeDataString(filter.Service)}&provider={Uri.EscapeDataString(filter.Provider)}";
         try
@@ -241,15 +257,29 @@ else if (stats is not null)
             stats = await Http.GetFromJsonAsync<UsageStats>("/admin/usage" + qs);
             hourly = await Http.GetFromJsonAsync<List<HourlyBucket>>("/admin/usage/hourly" + qs);
             BuildSeries();
+            _errorNotified = false;
         }
         catch
         {
-            // Show a load-error state — an outage must not masquerade as "no data".
-            stats ??= new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new(), new(), new());
-            hourly ??= new();
-            loadError = true;
+            // A background refresh failure keeps the last good numbers on screen
+            // — only the first load has nothing to show, so only it becomes an
+            // error state. (An outage must not masquerade as "no data" either.)
+            if (firstLoad)
+            {
+                stats ??= new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new(), new(), new());
+                hourly ??= new();
+                loadError = true;
+            }
+            else if (!_errorNotified)
+            {
+                _errorNotified = true;   // one toast per outage, not one per event
+                Toasts.Error("用量数据刷新失败，当前显示最近一次成功的数据。");
+            }
         }
         loading = false;
+        // Event-driven refreshes aren't DOM event handlers, so nothing renders
+        // automatically after the awaits — render the fresh data explicitly.
+        StateHasChanged();
     }
 
     private void BuildSeries()
@@ -318,5 +348,5 @@ else if (stats is not null)
     private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     private static MarkupString AxisLabel(string x, int y, string label) => (MarkupString)
-        $"<text x=\"{x}\" y=\"{y}\" font-size=\"10\" fill=\"#9aa3b8\" text-anchor=\"middle\">{label}</text>";
+        $"<text x=\"{x}\" y=\"{y}\" font-size=\"10\" style=\"fill:var(--eg-text-3)\" text-anchor=\"middle\">{label}</text>";
 }

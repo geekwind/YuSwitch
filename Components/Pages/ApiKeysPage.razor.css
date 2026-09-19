@@ -1,0 +1,88 @@
+/* API Key 页：端点卡片网格 + Key 表格列模板 */
+
+/* 调用地址：每行 4 列网格（标签 | 地址 | Header | 复制） */
+.eg-endpoints {
+    display: grid;
+    gap: 1px;
+    background: var(--eg-border-soft);
+    border: 1px solid var(--eg-border-soft);
+    border-radius: var(--eg-radius);
+    overflow: hidden;
+}
+
+.eg-ep-row {
+    display: grid;
+    grid-template-columns: 120px minmax(220px, 1.5fr) minmax(170px, 1fr) 44px;
+    align-items: center;
+    gap: 12px;
+    background: var(--eg-surface);
+    padding: 9px 14px;
+    min-width: 0;
+}
+
+.eg-ep-label {
+    font-size: 12.5px;
+    color: var(--eg-text-2);
+    font-weight: 500;
+}
+
+.eg-ep-url {
+    color: var(--eg-accent-text);
+    background: none;
+    padding: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.eg-ep-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.eg-ep-row .eg-btn-icon { justify-self: end; }
+
+.eg-ep-curl pre {
+    background: var(--eg-code);
+    border: 1px solid var(--eg-border);
+    border-radius: var(--eg-radius);
+    padding: 0.55rem 0.75rem;
+}
+
+/* Key 表格列模板 */
+.key-table {
+    --eg-gt-cols: 52px minmax(140px, 1fr) minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(140px, 0.9fr) 64px minmax(280px, auto);
+    --eg-gt-min: 1080px;
+}
+
+.key-table .eg-grow > span { min-width: 0; }
+
+.key-name {
+    color: var(--eg-text);
+    font-weight: 500;
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.key-val {
+    color: var(--eg-accent-text);
+    background: none;
+    padding: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.key-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}

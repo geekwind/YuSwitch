@@ -1,29 +1,27 @@
-﻿@inject AppSettingsService Settings
+@inject AppSettingsService Settings
 @inject AppVersionService AppInfo
 @inject IJSRuntime JS
 @implements IDisposable
 
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">
-            @if (Settings.LogoType == "image" && !string.IsNullOrEmpty(Settings.LogoValue))
-            {
-                <img class="brand-badge brand-logo-img" src="@Settings.LogoValue" alt="logo" />
-            }
-            else if (Settings.LogoType == "emoji" && !string.IsNullOrEmpty(Settings.LogoValue))
-            {
-                <span class="brand-badge brand-logo-emoji">@Settings.LogoValue</span>
-            }
-            else
-            {
-                <span class="brand-badge">@BrandInitials</span>
-            }
-            <span class="brand-text">
-                @Settings.AppName
-                <span class="brand-sub">@Settings.Subtitle</span>
-            </span>
-        </a>
-    </div>
+<div class="brand-row">
+    <a class="navbar-brand" href="">
+        @if (Settings.LogoType == "image" && !string.IsNullOrEmpty(Settings.LogoValue))
+        {
+            <img class="brand-badge brand-logo-img" src="@Settings.LogoValue" alt="logo" />
+        }
+        else if (Settings.LogoType == "emoji" && !string.IsNullOrEmpty(Settings.LogoValue))
+        {
+            <span class="brand-badge brand-logo-emoji">@Settings.LogoValue</span>
+        }
+        else
+        {
+            <span class="brand-badge">@BrandInitials</span>
+        }
+        <span class="brand-text">
+            <span class="brand-name">@Settings.AppName</span>
+            <span class="brand-sub">@Settings.Subtitle</span>
+        </span>
+    </a>
 </div>
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
@@ -32,69 +30,74 @@
     <nav class="flex-column">
         <div class="nav-section">总览</div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="menu-icon"><Icon Name="home" /></span> 仪表盘
+                <span class="menu-icon"><Icon Name="gauge" Size="16" /></span><span class="nav-label">仪表盘</span>
             </NavLink>
         </div>
 
         <div class="nav-section">配置</div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="services">
-                <span class="menu-icon"><Icon Name="server" /></span> 服务管理
+                <span class="menu-icon"><Icon Name="hard-drives" Size="16" /></span><span class="nav-label">服务管理</span>
             </NavLink>
         </div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="apikeys">
-                <span class="menu-icon"><Icon Name="key" /></span> API Key
+                <span class="menu-icon"><Icon Name="key" Size="16" /></span><span class="nav-label">API Key</span>
             </NavLink>
         </div>
 
         <div class="nav-section">观测</div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="playground">
-                <span class="menu-icon"><Icon Name="play" /></span> 接口测试
+                <span class="menu-icon"><Icon Name="play-circle" Size="16" /></span><span class="nav-label">接口测试</span>
             </NavLink>
         </div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="usage">
-                <span class="menu-icon"><Icon Name="chart" /></span> 用量统计
+                <span class="menu-icon"><Icon Name="chart-bar" Size="16" /></span><span class="nav-label">用量统计</span>
             </NavLink>
         </div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="logs">
-                <span class="menu-icon"><Icon Name="list" /></span> 调用日志
+                <span class="menu-icon"><Icon Name="list-magnifying-glass" Size="16" /></span><span class="nav-label">调用日志</span>
             </NavLink>
         </div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="dispatch-trace">
-                <span class="menu-icon"><Icon Name="zap" /></span> 路由追踪
+                <span class="menu-icon"><Icon Name="git-fork" Size="16" /></span><span class="nav-label">路由追踪</span>
             </NavLink>
         </div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="realtime">
-                <span class="menu-icon"><Icon Name="activity" /></span> 实时订阅
+                <span class="menu-icon"><Icon Name="broadcast" Size="16" /></span><span class="nav-label">实时订阅</span>
             </NavLink>
         </div>
 
         <div class="nav-section">系统</div>
 
-        <div class="nav-item px-2">
+        <div class="nav-item">
             <NavLink class="nav-link" href="settings">
-                <span class="menu-icon"><Icon Name="settings" /></span> 设置
+                <span class="menu-icon"><Icon Name="sliders-horizontal" Size="16" /></span><span class="nav-label">设置</span>
             </NavLink>
         </div>
     </nav>
 </div>
 
-<div class="nav-version">YuSwitch v@(AppInfo.Version)</div>
+<div class="nav-footer">
+    <span class="nav-version">v@(AppInfo.Version)</span>
+    <button type="button" class="rail-toggle" title="折叠导航" onclick="egToggleRail()">
+        <Icon Name="sidebar-simple" Size="13" />
+    </button>
+</div>
 
 @code {
     protected override void OnInitialized() => Settings.Changed += OnSettingsChanged;

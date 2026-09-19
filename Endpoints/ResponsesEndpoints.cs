@@ -23,7 +23,8 @@ public static class ResponsesEndpoints
 {
     public static IEndpointRouteBuilder MapResponsesEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/v1");
+        // CORS "Any" only on the gateway data plane (see Program.cs).
+        var g = app.MapGroup("/v1").RequireCors("Any");
         g.MapPost("/responses", HandleResponses);
         return app;
     }

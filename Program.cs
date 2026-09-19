@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Serilog;
@@ -87,7 +88,7 @@ Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
     .WriteTo.Console()
-    .WriteTo.File("logs/easy-gateway-.log", rollingInterval: RollingInterval.Day)
+    .WriteTo.File("logs/yuswitch-.log", rollingInterval: RollingInterval.Day)
     .CreateLogger();
 builder.Host.UseSerilog();
 
@@ -367,6 +368,19 @@ using (var scope = app.Services.CreateScope())
 }
 
 // --- Middleware pipeline ---
+// Honor X-Forwarded-For ONLY when the immediate peer is a loopback proxy (the
+// documented same-host TLS reverse-proxy deployment). Without this, every
+// proxied request looks loopback and AdminAuthMiddleware's loopback bypass
+// would leave /admin unauthenticated for the whole network. Peers that are
+// NOT loopback can't spoof the header (KnownProxies check), so direct
+// internet-facing binds stay fail-closed. Must run first so every downstream
+// consumer (auth, rate limiter, logs) sees the real client IP.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor,
+    KnownProxies = { System.Net.IPAddress.Loopback, System.Net.IPAddress.IPv6Loopback },
+});
+
 app.UseSerilogRequestLogging();
 
 if (!app.Environment.IsDevelopment())
@@ -385,11 +399,16 @@ if (!Directory.Exists(Path.Combine(app.Environment.ContentRootPath, "wwwroot")))
 }
 app.UseAntiforgery();
 
-// Permissive CORS (open gateway). Placed BEFORE the auth middleware so that
-// cross-origin preflight (OPTIONS) is answered by the CORS layer with the
-// Access-Control-Allow-* headers instead of being rejected with a 401 — the
-// preflight carries no credentials, so it can never pass the API-key check.
-app.UseCors("Any");
+// CORS is METADATA-scoped, not global: the permissive "Any" policy is applied
+// via RequireCors ONLY on the gateway data plane (/v1/*) so browser-hosted
+// client apps can call the API. The admin surface (Blazor UI, /admin/*) gets
+// NO CORS headers at all — with AllowAnyOrigin here, any web page open in the
+// operator's browser could read /admin/export (plaintext upstream keys) and
+// mutate settings through the loopback auth bypass. The parameterless
+// UseCors resolves the policy from endpoint metadata; placed before the auth
+// middleware so preflight (OPTIONS, credential-less) is answered by the CORS
+// layer instead of being rejected with 401.
+app.UseCors();
 
 // Admin auth (loopback zero-friction / token when set) then gateway API auth.
 app.UseMiddleware<AdminAuthMiddleware>();
@@ -664,7 +683,7 @@ static void FatalDbError(string detail)
     if (OperatingSystem.IsWindows() && Environment.UserInteractive)
     {
         System.Windows.Forms.MessageBox.Show(
-            "YuSwitch 启动失败：数据库异常。\n\n" + detail + "\n\n（详见 logs/easy-gateway-.log）",
+            "YuSwitch 启动失败：数据库异常。\n\n" + detail + "\n\n（详见 logs/yuswitch-.log）",
             "YuSwitch",
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Error);

@@ -1,0 +1,62 @@
+/* 设置页：横向 tabs + 卡片 */
+
+.eg-settings {
+    max-width: 780px;
+}
+
+/* 横向 tabs：下划线式，激活项 accent 高亮 */
+.eg-settings-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    border-bottom: 1px solid var(--eg-border);
+    margin-bottom: 20px;
+}
+
+.eg-settings-tab {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-family: inherit;
+    color: var(--eg-text-3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.13s ease, border-color 0.13s ease;
+}
+
+.eg-settings-tab:hover {
+    color: var(--eg-text);
+}
+
+.eg-settings-tab.active {
+    color: var(--eg-accent-text);
+    border-bottom-color: var(--eg-primary);
+}
+
+/* 内容卡片 */
+.eg-settings-body {
+    min-width: 0;
+}
+
+.eg-settings-card {
+    margin-bottom: 20px;
+}
+
+/* 负载均衡参数：自适应多列网格，每格底部显示取值范围 */
+.eg-tuning-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(214px, 1fr));
+    gap: 14px;
+    margin-bottom: 4px;
+}
+
+.eg-range {
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--eg-text-3);
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+}

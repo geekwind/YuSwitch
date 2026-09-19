@@ -918,12 +918,15 @@ public static class AdminEndpoints
             // Gateway-side web search global key — masked like the admin token so
             // the UI shows "set/not set" but never the plaintext.
             [AppSettingsService.KeyWebSearchTavilyKey] = MaskSecret(settings.WebSearchTavilyKey),
+            // Not a secret — return so API clients can see the configured source.
+            [AppSettingsService.KeyUpdateBaseUrl] = settings.UpdateBaseUrl,
             [AppSettingsService.KeyRequestTimeoutDefaultS] = settings.RequestTimeoutDefaultS.ToString(),
             [AppSettingsService.KeyStreamIdleTimeoutS] = settings.StreamIdleTimeoutS.ToString(),
             [AppSettingsService.KeyHealthProbeEnabled] = settings.HealthProbeEnabled ? "true" : "false",
             [AppSettingsService.KeyHealthProbeIntervalS] = settings.HealthProbeIntervalS.ToString(),
             // Adaptive LB / circuit-breaker / rate-limit tunables (hot-reloaded).
             [AppSettingsService.KeyLbEwmaAlpha] = settings.LbEwmaAlpha.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [AppSettingsService.KeyLbColdStartMs] = settings.LbColdStartMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             [AppSettingsService.KeyBreakerFailureThreshold] = settings.BreakerFailureThreshold.ToString(),
             [AppSettingsService.KeyBreakerCooldownBaseS] = settings.BreakerCooldownBaseS.ToString(),
             [AppSettingsService.KeyBreaker429PenaltyMs] = settings.Breaker429PenaltyMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -940,7 +943,7 @@ public static class AdminEndpoints
         [FromServices] AppSettingsService settings,
         CancellationToken ct)
     {
-        foreach (var key in new[]
+        var allowed = new[]
         {
             AppSettingsService.KeyAppName,
             AppSettingsService.KeySubtitle,
@@ -957,6 +960,7 @@ public static class AdminEndpoints
             AppSettingsService.KeyHealthProbeIntervalS,
             // Adaptive LB / circuit-breaker / rate-limit tunables + retention.
             AppSettingsService.KeyLbEwmaAlpha,
+            AppSettingsService.KeyLbColdStartMs,
             AppSettingsService.KeyBreakerFailureThreshold,
             AppSettingsService.KeyBreakerCooldownBaseS,
             AppSettingsService.KeyBreaker429PenaltyMs,
@@ -966,7 +970,9 @@ public static class AdminEndpoints
             AppSettingsService.KeyLbStickyFactor,
             AppSettingsService.KeyRateLimitEnabled,
             AppSettingsService.KeyUsageLogRetentionDays,
-        })
+        };
+        var batch = new Dictionary<string, string>();
+        foreach (var key in allowed)
             if (incoming.TryGetValue(key, out var v))
             {
                 // A masked value round-tripped from GetSettings means "unchanged" —
@@ -975,8 +981,11 @@ public static class AdminEndpoints
                 if ((key == AppSettingsService.KeyAdminToken ||
                      key == AppSettingsService.KeyWebSearchTavilyKey) && LooksMasked(v ?? ""))
                     continue;
-                await settings.SetAsync(key, v?.Trim() ?? "", ct);
+                batch[key] = v?.Trim() ?? "";
             }
+        // One DB round-trip + one reload + one Changed for the whole save,
+        // instead of per key.
+        await settings.SetManyAsync(batch, ct);
         return Results.Json(new { ok = true }, AdminJsonOpts);
     }
 
@@ -1212,9 +1221,11 @@ public static class AdminEndpoints
             });
         }
 
+        // Random demo key (never a fixed public value — a predictable seed key
+        // would be usable by anyone on an exposed instance).
         db.ApiKeys.Add(new ApiKeyEntity
         {
-            KeyValue = "sk-yuswitch-local",
+            KeyValue = "sk-" + Guid.NewGuid().ToString("N"),
             Name = "local",
             Enabled = true,
             AllowedModels = "*",
@@ -1235,6 +1246,9 @@ public static class AdminEndpoints
     };
 
     private static async Task<IResult> QueryAsync<T>(
-        IDbContextFactory<AppDbContext> dbf, Func<AppDbContext, Task<List<T>>> query) =>
-        Results.Json(await query(await dbf.CreateDbContextAsync()), AdminJsonOpts);
+        IDbContextFactory<AppDbContext> dbf, Func<AppDbContext, Task<List<T>>> query)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        return Results.Json(await query(db), AdminJsonOpts);
+    }
 }

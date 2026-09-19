@@ -1,7 +1,8 @@
 @page "/logs"
 @inject HttpClient Http
+@inject IJSRuntime Js
+@inject ToastService Toasts
 @inject RealtimeNotificationService Notifications
-@inject IHttpContextAccessor HttpContextAccessor
 @using YuSwitch.Services
 @implements IDisposable
 
@@ -19,14 +20,23 @@
                 <input class="form-check-input" type="checkbox" checked="@autoRefresh" @onchange="e => OnAutoRefreshChanged((bool)e.Value!)" id="autoRefreshSwitch">
                 <label class="form-check-label" for="autoRefreshSwitch">自动刷新</label>
             </div>
-            <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@loading">
-                @if (loading) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync" disabled="@refreshing">
+                @if (refreshing) { <span class="spinner-border spinner-border-sm"></span> } else { <text>刷新</text> }
             </button>
         </div>
     </div>
 </div>
 
 <UsageFilterBar ShowKeyword="true" ShowStatus="true" OnApply="OnFilter" />
+
+@if (pendingNew > 0)
+{
+    @* 新日志在视口之外时只计数，不挪动用户当前视图 *@
+    <button type="button" class="log-newbar" @onclick="ShowNewest">
+        <span><strong>@pendingNew</strong> 条新日志</span>
+        <span class="log-newbar-hint">点击查看最新</span>
+    </button>
+}
 
 @if (loading)
 {
@@ -45,88 +55,77 @@ else if (logs is null || logs.Count == 0)
 }
 else
 {
-    <div class="eg-table-card">
-    <table class="table table-hover table-sm align-middle eg-logtable">
-        <thead>
-            <tr>
-                <th style="width:84px">时间</th>
-                <th>调用链路 (别名 → 真实模型)</th>
-                <th style="width:120px">服务</th>
-                <th style="width:56px">状态</th>
-                <th style="width:110px" class="text-end">Tokens (P/C·Σ)</th>
-                <th style="width:64px">缓存</th>
-                <th style="width:76px" class="text-end">延迟</th>
-                <th style="width:76px" class="text-end">首字</th>
-                <th style="width:48px"></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var l in logs)
-            {
-                var expanded = expandedId == RowId(l);
-                <tr class="eg-logrow @(expanded ? "open" : "")" @onclick="() => Toggle(l)">
-                    <td><small>@l.timestamp?.Substring(11, 8)</small></td>
-                    <td>
-                        <span class="eg-chain eg-chain-stack">
-                            <code>@l.model</code>
-                            @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
-                            {
-                                <span class="eg-chain-real">
-                                    <span class="eg-chain-arrow">→</span>
-                                    <code class="eg-chain-up">@l.upstreamModel</code>
-                                </span>
-                            }
-                        </span>
-                    </td>
-                    <td><small>@l.service</small></td>
-                    <td>
-                        @if (l.success) { <span class="badge bg-success">✓</span> }
-                        else { <span class="badge bg-danger">@l.statusCode</span> }
-                    </td>
-                    <td class="text-end"><small class="eg-tok">
+    <div class="eg-gtable log-table">
+        <div class="eg-gthead">
+            <span>时间</span>
+            <span>调用链路 (别名 → 真实模型)</span>
+            <span>服务</span>
+            <span>状态</span>
+            <span class="text-end">Tokens P/C·Σ</span>
+            <span>缓存</span>
+            <span class="text-end">延迟</span>
+            <span class="text-end">首字</span>
+            <span></span>
+        </div>
+        @foreach (var l in logs)
+        {
+            var expanded = expandedId == RowId(l);
+            <div class="eg-grow eg-grow-click @(expanded ? "open" : "")" @onclick="() => Toggle(l)">
+                <span class="eg-mono-dim">@l.timestamp?.Substring(11, 8)</span>
+                <span class="eg-chain2">
+                    <span class="eg-chain2-alias">@l.model</span>
+                    @if (!string.IsNullOrEmpty(l.upstreamModel) && l.upstreamModel != l.model)
+                    {
+                        <span class="eg-chain2-up">↳ @l.upstreamModel</span>
+                    }
+                </span>
+                <span class="eg-mono-dim">@l.service</span>
+                <span>
+                    @if (l.success) { <span class="badge bg-success">✓</span> }
+                    else { <span class="badge bg-danger">@l.statusCode</span> }
+                </span>
+                <span class="text-end">
+                    <span class="eg-tok">
                         <span>@UiFormat.N(l.promptTokens) / @UiFormat.N(l.completionTokens)</span>
                         <span class="eg-tok-total">Σ @UiFormat.N(l.totalTokens)</span>
-                    </small></td>
-                    <td>
-                        @if (l.cacheHit) { <span class="badge bg-info">命中</span> }
-                        else if (l.cacheCreationTokens > 0 || l.cacheReadTokens > 0) { <span class="badge bg-secondary">缓存</span> }
-                        else { <small class="text-muted">-</small> }
-                    </td>
-                    <td class="text-end"><small>@UiFormat.Sec(l.latencyMs)</small></td>
-                    <td class="text-end"><small title="@(l.ttftMs > 0 ? "首字延迟(TTFT)" : (l.stream ? "流式但未记录到 TTFT" : "非流式请求,无首字延迟"))">@(l.ttftMs > 0 ? UiFormat.Sec(l.ttftMs) : "-")</small></td>
-                    <td class="text-muted text-center">@(expanded ? "▾" : "▸")</td>
-                </tr>
-                @if (expanded)
-                {
-                    <tr class="eg-logdetail">
-                        <td colspan="9">
-                            <div class="eg-detail-grid">
-                                <div>
-                                    <div class="eg-detail-label">Prompt</div>
-                                    <div class="eg-detail-box">@l.promptPreview</div>
-                                </div>
-                                <div>
-                                    <div class="eg-detail-label">Response</div>
-                                    <div class="eg-detail-box">@l.responsePreview</div>
-                                </div>
-                            </div>
-                            <div class="eg-detail-meta">
-                                <span><strong>Provider:</strong> @l.provider</span>
-                                @if (!string.IsNullOrEmpty(l.upstreamModel))
-                                { <span><strong>上游模型:</strong> @l.upstreamModel</span> }
-                                @if (l.reasoningTokens > 0)
-                                { <span><strong>推理 tokens:</strong> @UiFormat.N(l.reasoningTokens)</span> }
-                                @if (l.stream)
-                                { <span><strong>流式</strong></span> }
-                                @if (!string.IsNullOrEmpty(l.error))
-                                { <span class="text-danger"><strong>错误:</strong> @Trunc(l.error, 200)</span> }
-                            </div>
-                        </td>
-                    </tr>
-                }
+                    </span>
+                </span>
+                <span>
+                    @if (l.cacheHit) { <span class="badge bg-info">命中</span> }
+                    else if (l.cacheCreationTokens > 0 || l.cacheReadTokens > 0) { <span class="badge bg-secondary">缓存</span> }
+                    else { <span class="text-muted">-</span> }
+                </span>
+                <span class="text-end eg-mono-dim">@UiFormat.Sec(l.latencyMs)</span>
+                <span class="text-end eg-mono-dim" title="@(l.ttftMs > 0 ? "首字延迟(TTFT)" : (l.stream ? "流式但未记录到 TTFT" : "非流式请求,无首字延迟"))">@(l.ttftMs > 0 ? UiFormat.Sec(l.ttftMs) : "-")</span>
+                <span class="text-center text-muted log-caret">@(expanded ? "▾" : "▸")</span>
+            </div>
+            @if (expanded)
+            {
+                <div class="eg-logdetail2">
+                    <div class="eg-detail-grid">
+                        <div>
+                            <div class="eg-detail-label">Prompt</div>
+                            <div class="eg-detail-box">@l.promptPreview</div>
+                        </div>
+                        <div>
+                            <div class="eg-detail-label">Response</div>
+                            <div class="eg-detail-box">@l.responsePreview</div>
+                        </div>
+                    </div>
+                    <div class="eg-detail-meta">
+                        <span><strong>Provider:</strong> @l.provider</span>
+                        @if (!string.IsNullOrEmpty(l.upstreamModel))
+                        { <span><strong>上游模型:</strong> @l.upstreamModel</span> }
+                        @if (l.reasoningTokens > 0)
+                        { <span><strong>推理 tokens:</strong> @UiFormat.N(l.reasoningTokens)</span> }
+                        @if (l.stream)
+                        { <span><strong>流式</strong></span> }
+                        @if (!string.IsNullOrEmpty(l.error))
+                        { <span class="text-danger"><strong>错误:</strong> @Trunc(l.error, 200)</span> }
+                    </div>
+                </div>
             }
-        </tbody>
-    </table>
+        }
     </div>
     <div class="d-flex justify-content-between align-items-center mt-2">
         <small class="text-muted">共 @total 条 · 第 @(page + 1)/@TotalPages 页</small>
@@ -140,12 +139,15 @@ else
 @code {
     private List<CallLog>? logs;
     private bool loading = true;
+    private bool refreshing;
     private bool loadError;
+    private bool _errorNotified;
     private int total;
     private int page;
     private const int PageSize = 100;
     private int TotalPages => Math.Max(1, (total + PageSize - 1) / PageSize);
     private string? expandedId;
+    private int pendingNew;   // rows that arrived while this view shouldn't move
     private UsageFilterBar.FilterValues filter = new(24, "", "", "", "", "");
     private bool autoRefresh = true;
     private string? _circuitId;
@@ -157,14 +159,37 @@ else
     protected override async Task OnInitializedAsync()
     {
         // Get Circuit ID for subscription
-        _circuitId = HttpContextAccessor?.HttpContext?.Connection.Id;
+        _circuitId = Guid.NewGuid().ToString("N");
 
-        // Set up callback for notifications with smart filtering
+        // Live update: notifications carry the log rows themselves, so a new
+        // entry is prepended in place instead of triggering a full re-query
+        // (which used to blank the table, drop scroll and collapse the
+        // expanded row on every event).
         _refreshCallback = (context) => InvokeAsync(async () =>
         {
-            if (autoRefresh && ShouldRefresh(context))
+            if (!autoRefresh || context is null) return;
+
+            if (context.NewLogs is not { Count: > 0 } batch)
             {
-                await LoadAsync();
+                // Legacy signal-only notification (no rows attached): fall back
+                // to a silent re-query.
+                if (ShouldRefresh(context)) await LoadAsync();
+                return;
+            }
+
+            var matching = batch.Where(MatchesFilter).ToList();
+            if (matching.Count == 0) return;
+
+            if (page == 0 && !loading && await IsNearTopAsync())
+            {
+                PrependRows(matching);
+            }
+            else
+            {
+                // Far down the list or on another page — keep the viewport
+                // still and let the user jump when they want.
+                pendingNew += matching.Count;
+                StateHasChanged();
             }
         });
 
@@ -190,9 +215,97 @@ else
         await LoadAsync();
     }
 
+    /// <summary>True while the window is still near the top, i.e. prepending
+    /// rows won't shove content the user is reading. Falls back to false (count
+    /// instead of prepend) if the JS helper is unavailable.</summary>
+    private async Task<bool> IsNearTopAsync()
+    {
+        try { return await Js.InvokeAsync<bool>("egIsNearTop", 160); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Row-level match against the active filters, mirroring the server-side
+    /// predicate in AdminEndpoints.GetCallLogs (exact match on model/service/
+    /// provider, substring on keyword) so the incremental list can't show rows
+    /// a re-query would exclude.
+    /// </summary>
+    private bool MatchesFilter(NewLogItem l)
+    {
+        if (!string.IsNullOrEmpty(filter.Model) && l.Model != filter.Model) return false;
+        if (!string.IsNullOrEmpty(filter.Service) && l.Service != filter.Service) return false;
+        if (!string.IsNullOrEmpty(filter.Provider) && l.Provider != filter.Provider) return false;
+        if (filter.Status == "success" && !l.Success) return false;
+        if (filter.Status == "failed" && l.Success) return false;
+        if (!string.IsNullOrEmpty(filter.Keyword) &&
+            !HasKeyword(l.Model) && !HasKeyword(l.UpstreamModel) && !HasKeyword(l.Service) &&
+            !HasKeyword(l.PromptPreview) && !HasKeyword(l.ResponsePreview)) return false;
+        return true;
+    }
+
+    private bool HasKeyword(string? s) =>
+        s?.Contains(filter.Keyword, StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>Insert newly arrived rows at the top, newest first, deduped
+    /// against what's already on screen and trimmed back to one page.</summary>
+    private void PrependRows(List<NewLogItem> matching)
+    {
+        if (logs is null) return;
+
+        var seen = logs.Select(RowId).ToHashSet(StringComparer.Ordinal);
+        var fresh = matching
+            .OrderByDescending(l => l.Timestamp)
+            .Select(ToCallLog)
+            .Where(l => seen.Add(RowId(l)))
+            .ToList();
+        if (fresh.Count == 0) return;
+
+        logs.InsertRange(0, fresh);
+        if (logs.Count > PageSize) logs.RemoveRange(PageSize, logs.Count - PageSize);
+        total += fresh.Count;
+        pendingNew = 0;
+        StateHasChanged();
+    }
+
+    private static CallLog ToCallLog(NewLogItem l) => new()
+    {
+        timestamp = l.Timestamp.ToString("yyyy-MM-ddTHH:mm:ss"),
+        model = l.Model,
+        upstreamModel = l.UpstreamModel,
+        service = l.Service,
+        provider = l.Provider,
+        success = l.Success,
+        statusCode = l.StatusCode,
+        promptTokens = l.PromptTokens,
+        completionTokens = l.CompletionTokens,
+        totalTokens = l.TotalTokens,
+        reasoningTokens = l.ReasoningTokens,
+        cacheCreationTokens = l.CacheCreationTokens,
+        cacheReadTokens = l.CacheReadTokens,
+        cacheHit = l.CacheHit,
+        latencyMs = l.LatencyMs,
+        ttftMs = l.TtftMs,
+        stream = l.Stream,
+        promptPreview = l.PromptPreview,
+        responsePreview = l.ResponsePreview,
+        error = string.IsNullOrEmpty(l.Error) ? null : l.Error,
+    };
+
+    private async Task ShowNewest()
+    {
+        page = 0;
+        pendingNew = 0;
+        expandedId = null;
+        await LoadAsync();
+        // The user asked to see the newest entries — put them in view instead of
+        // leaving the viewport parked wherever it was.
+        try { await Js.InvokeVoidAsync("egScrollToTop"); } catch { /* interop unavailable */ }
+    }
+
     /// <summary>
     /// Determine if the page should refresh based on the notification context.
-    /// Returns true if no filters are set, or if the notification matches the current filters.
+    /// Only used for signal-only notifications — payloads carry their rows.
+    /// Returns true if no filters are set, or if the notification matches them.
     /// </summary>
     private bool ShouldRefresh(Services.NotificationContext? context)
     {
@@ -229,7 +342,7 @@ else
 
     private async Task OnFilter(UsageFilterBar.FilterValues f)
     {
-        filter = f; expandedId = null; page = 0; await LoadAsync();
+        filter = f; expandedId = null; page = 0; pendingNew = 0; await LoadAsync();
         // Sync auto-refresh state to other tabs
         Notifications.BroadcastSync(_userKey, new Services.SyncEvent
         {
@@ -255,14 +368,21 @@ else
         expandedId = expandedId == id ? null : id;
     }
 
-    private async Task PrevPage() { if (page > 0) { page--; expandedId = null; await LoadAsync(); } }
-    private async Task NextPage() { if (page + 1 < TotalPages) { page++; expandedId = null; await LoadAsync(); } }
+    private async Task PrevPage() { if (page > 0) { page--; expandedId = null; pendingNew = 0; await LoadAsync(); } }
+    private async Task NextPage() { if (page + 1 < TotalPages) { page++; expandedId = null; pendingNew = 0; await LoadAsync(); } }
 
     private async Task LoadAsync()
     {
-        loading = true;
+        // The skeleton is for the first paint only. Later loads (event-driven
+        // or manual) swap the data in place so the table never blanks out.
+        var firstLoad = logs is null;
+        if (firstLoad)
+        {
+            loading = true;
+            StateHasChanged();
+        }
+        refreshing = true;
         loadError = false;
-        StateHasChanged();
         var qs = $"?limit={PageSize}&offset={page * PageSize}&model={Uri.EscapeDataString(filter.Model)}" +
                  $"&service={Uri.EscapeDataString(filter.Service)}&provider={Uri.EscapeDataString(filter.Provider)}" +
                  $"&status={filter.Status}&q={Uri.EscapeDataString(filter.Keyword)}";
@@ -271,16 +391,31 @@ else
             var result = await Http.GetFromJsonAsync<CallLogPage>("/admin/call-logs" + qs);
             logs = result?.items ?? new();
             total = result?.total ?? 0;
+            _errorNotified = false;
         }
         catch
         {
             // Distinguish "endpoint failed" from "genuinely no data" — silently
             // showing 暂无数据 on errors hides real outages from the operator.
-            logs = new();
-            total = 0;
-            loadError = true;
+            // A refresh failure keeps the rows already on screen; only the first
+            // load has nothing to show, so only it becomes an error state.
+            if (firstLoad)
+            {
+                logs = new();
+                total = 0;
+                loadError = true;
+            }
+            else if (!_errorNotified)
+            {
+                _errorNotified = true;   // one toast per outage, not one per event
+                Toasts.Error("日志刷新失败，当前显示最近一次成功的数据。");
+            }
         }
         loading = false;
+        refreshing = false;
+        // Event-driven refreshes aren't DOM event handlers, so nothing renders
+        // automatically after the awaits — render the fresh rows explicitly.
+        StateHasChanged();
     }
 
     private static string Trunc(string? s, int n) =>

@@ -181,4 +181,26 @@ public class AppSettingsService
         await ReloadAsync(ct);
         Changed?.Invoke();
     }
+
+    /// <summary>Batch upsert: one context, one SaveChanges, one reload, one
+    /// Changed event — used by SaveSettings so saving ~20 keys doesn't mean
+    /// ~20 DB round-trips and ~20 full-circuit re-renders.</summary>
+    public async Task SetManyAsync(IReadOnlyDictionary<string, string> kvs, CancellationToken ct = default)
+    {
+        if (kvs.Count == 0) return;
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var keys = kvs.Keys.ToList();
+        var existing = await db.Settings.Where(s => keys.Contains(s.Key)).ToListAsync(ct);
+        foreach (var (key, value) in kvs)
+        {
+            var row = existing.FirstOrDefault(s => s.Key == key);
+            if (row is null)
+                db.Settings.Add(new SettingEntity { Key = key, Value = value ?? "" });
+            else
+                row.Value = value ?? "";
+        }
+        await db.SaveChangesAsync(ct);
+        await ReloadAsync(ct);
+        Changed?.Invoke();
+    }
 }

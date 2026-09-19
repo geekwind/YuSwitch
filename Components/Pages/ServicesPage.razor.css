@@ -1,0 +1,77 @@
+/* 服务管理页：表格列模板 + 工具条 / 搜索 / 名称单元 / 操作区 */
+
+.svc-table {
+    --eg-gt-cols: 54px minmax(150px, 1.5fr) 104px minmax(190px, 2fr) 62px 58px minmax(296px, 1fr);
+    --eg-gt-min: 960px;
+}
+
+/* 工具条：搜索框 + 弹性占位 + 统计 */
+.svc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.svc-search {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 340px;
+}
+
+    /* Icon 是子组件，需 ::deep 才能命中其 svg */
+    .svc-search ::deep svg {
+        position: absolute;
+        left: 10px;
+        color: var(--eg-text-3);
+        pointer-events: none;
+    }
+
+    .svc-search input {
+        width: 100%;
+        padding-left: 30px;
+    }
+
+.svc-stats {
+    font-size: 12px;
+    color: var(--eg-text-3);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 名称单元：服务名 + 优先级药丸，单行省略 */
+.svc-namecell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.svc-name {
+    color: var(--eg-text);
+    font-weight: 500;
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.svc-prio { font-size: 10px; padding: 1px 6px; }
+
+.svc-url { max-width: 100%; }
+
+/* 操作区：测试 / 模型 / 编辑 / 克隆 / 删除 */
+.svc-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.svc-footnote {
+    margin: 12px 2px 0;
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+    line-height: 1.5;
+}

@@ -1,0 +1,32 @@
+/* 路由追踪：CSS Grid 表格列模板 + 过滤工具条 */
+
+.trace-table {
+    --eg-gt-cols: 88px minmax(110px, 0.8fr) minmax(180px, 1.4fr) 110px 116px 92px 84px 60px;
+    --eg-gt-min: 900px;
+}
+
+.trace-table .eg-grow > span { min-width: 0; }
+
+/* 过滤工具条 */
+.trace-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.trace-filter-label {
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--eg-text-3);
+    margin: 0;
+}
+
+.trace-model-select { width: 240px; }
+
+.trace-note {
+    font-size: 11.5px;
+    color: var(--eg-text-3);
+}

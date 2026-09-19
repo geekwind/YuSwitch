@@ -191,7 +191,7 @@ public class GatewayService
                 _usage.Record(BuildLog(svc, model, req, apiKeyName, resp.Usage, sw, true, 200, null,
                     responsePreview: preview));
                 // Notify service state change (breaker closed)
-                _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                _notifications?.Broadcast("service-state", new() { Service = svc.Name });
                 RecordTrace(req.ClientModel.Length > 0 ? req.ClientModel : req.Model, req.SessionId, svc.Name, svc.Priority, svc.Weight, true);
                 return resp;
             }
@@ -211,7 +211,7 @@ public class GatewayService
                 _usage.Record(BuildLog(svc, model, req, apiKeyName, null, sw, false, ex is UpstreamException ue ? (int)ue.StatusCode : 500, ex.Message));
                 RecordTrace(req.ClientModel.Length > 0 ? req.ClientModel : req.Model, req.SessionId, svc.Name, svc.Priority, svc.Weight, false);
                 // Notify service state change (breaker may have opened)
-                _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                _notifications?.Broadcast("service-state", new() { Service = svc.Name });
                 // A caller error (400/422/... — NOT 401/403) is the CLIENT's
                 // problem, not this upstream's health — retrying it against every
                 // other upstream would just burn quota and latency. 401/403 are
@@ -360,7 +360,7 @@ public class GatewayService
                 st.OnSuccess();
                 _lastPicked[$"{stickyModel}|{svc.Priority}"] = svc.Id;   // sticky anchor
                 // Notify service state change (breaker closed)
-                _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                _notifications?.Broadcast("service-state", new() { Service = svc.Name });
                 // First chunk in hand: clear the first-byte deadline and promote
                 // the linked source to liveCts for Phase 2.
                 attemptCts.CancelAfter(Timeout.InfiniteTimeSpan);
@@ -388,7 +388,7 @@ public class GatewayService
                 st.Exit();                                  // release the slot for the failed attempt
                 _log.LogWarning(ex, "stream provider {Type} failed pre-stream for {Model} ({Kind})", svc.ProviderType, req.Model, kind);
                 // Notify service state change (breaker may have opened)
-                _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                _notifications?.Broadcast("service-state", new() { Service = svc.Name });
                 _usage.Record(BuildLog(svc, model, req, apiKeyName, null, sw, false,
                     ex is UpstreamException ue ? (int)ue.StatusCode : 500, ex.Message));
                 RecordTrace(req.ClientModel.Length > 0 ? req.ClientModel : req.Model, req.SessionId, svc.Name, svc.Priority, svc.Weight, false);
@@ -457,6 +457,9 @@ public class GatewayService
                     // error event. (yield can't sit in a try-with-catch — that's
                     // why this catch wraps only MoveNextAsync, never a yield.)
                     ApplyToBreaker(activeState, Classify(failure), lb);
+                    // Notify service state change (breaker may have opened) —
+                    // same signal the pre-stream failure path emits.
+                    _notifications?.Broadcast("service-state", new() { Service = activeSvc.Name });
                     _usage.Record(BuildLog(activeSvc, activeModel!, req, apiKeyName, usage, sw, false,
                         failure is UpstreamException ue ? (int)ue.StatusCode : 500, failure.Message, ttftMs: ttft));
                     throw failure;
@@ -692,7 +695,7 @@ public class GatewayService
                     PromptPreview = Trunc($"[embeddings ×{req.Input.Count}] {req.Input.FirstOrDefault() ?? ""}", 256),
                     ResponsePreview = $"[{resp.Data.Count} vectors]",
                 });
-                _notifications?.BroadcastImmediate("service-state", new() { Service = svc.Name });
+                _notifications?.Broadcast("service-state", new() { Service = svc.Name });
                 return resp;
             }
             catch (Exception ex)

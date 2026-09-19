@@ -16,6 +16,7 @@ public class UsageService : IDisposable
     private readonly ILogger<UsageService> _log;
     private readonly AppSettingsService _settings;
     private readonly Channel<UsageLogEntity> _ch;
+    private readonly Task _drainTask;
     private readonly RealtimeNotificationService? _notifications;
     private readonly System.Threading.Timer _retentionTimer;
     private int _cleanupRunning; // Interlocked guard against overlapping cleanups
@@ -33,7 +34,7 @@ public class UsageService : IDisposable
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
         });
-        _ = Task.Run(DrainAsync);
+        _drainTask = Task.Run(DrainAsync);
 
         // Retention cleanup: first sweep shortly after startup, then hourly.
         // The retention window is re-read from AppSettingsService on each run,
@@ -45,6 +46,12 @@ public class UsageService : IDisposable
     public void Dispose()
     {
         _retentionTimer.Dispose();
+        // Flush on shutdown: complete the channel and give the drainer a
+        // bounded window to persist the queued logs (best effort — exit
+        // must not hang on a wedged DB).
+        _ch.Writer.TryComplete();
+        try { _drainTask.Wait(TimeSpan.FromSeconds(5)); }
+        catch { /* drainer faulted on shutdown — nothing more to do */ }
         GC.SuppressFinalize(this);
     }
 
@@ -84,16 +91,24 @@ public class UsageService : IDisposable
     {
         if (_ch.Writer.TryWrite(entry))
         {
-            // Notify with context for smart filtering
+            // Notify with context for smart filtering, and ride the full row
+            // along so live views can prepend it without a re-query.
             var context = new NotificationContext
             {
                 Model = entry.Model,
                 Service = entry.ServiceName,
-                Provider = entry.ProviderType
+                Provider = entry.ProviderType,
+                NewLogs = new List<NewLogItem> { ToItem(entry) }
             };
             _notifications?.Broadcast("new-log", context);
         }
     }
+
+    private static NewLogItem ToItem(UsageLogEntity e) => new(
+        e.Timestamp, e.ApiKeyName, e.Model, e.UpstreamModel, e.ProviderType, e.ServiceName,
+        e.Success, e.StatusCode, e.PromptTokens, e.CompletionTokens, e.TotalTokens,
+        e.ReasoningTokens, e.CacheCreationTokens, e.CacheReadTokens, e.CacheHit,
+        e.LatencyMs, e.TtftMs, e.Stream, e.PromptPreview, e.ResponsePreview, e.Error);
 
     private async Task DrainAsync()
     {
@@ -126,32 +141,58 @@ public class UsageService : IDisposable
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var since = DateTime.Now.AddHours(-hours);
-        var logs = await Filtered(db, since, model, service, provider).ToListAsync(ct);
+        var q = Filtered(db, since, model, service, provider);
+
+        // Server-side aggregation: one grouped scalar query + one GROUP BY per
+        // breakdown dimension, instead of materializing every row of the
+        // window into memory twice (stats + hourly) per dashboard load.
+        var agg = await q.GroupBy(_ => 1).Select(g => new
+        {
+            Total = g.Count(),
+            Success = g.Sum(l => l.Success ? 1 : 0),
+            PromptTokens = g.Sum(l => l.PromptTokens),
+            CompletionTokens = g.Sum(l => l.CompletionTokens),
+            TotalTokens = g.Sum(l => l.TotalTokens),
+            ReasoningTokens = g.Sum(l => l.ReasoningTokens),
+            CacheCreationTokens = g.Sum(l => l.CacheCreationTokens),
+            CacheReadTokens = g.Sum(l => l.CacheReadTokens),
+            CacheHitCount = g.Sum(l => l.CacheHit ? 1 : 0),
+            AvgLatency = g.Average(l => (double)l.LatencyMs),
+            // AVG skips NULLs → averages over rows with a real TTFT only.
+            AvgTtft = g.Average(l => l.TtftMs > 0 ? (double?)l.TtftMs : null),
+        }).FirstOrDefaultAsync(ct);
+
+        var byModel = await Breakdown(q.GroupBy(l => l.Model), ct);
+        var byProvider = await Breakdown(q.GroupBy(l => l.ProviderType), ct);
+        var byService = await Breakdown(q.GroupBy(l => l.ServiceName), ct);
+        var byApiKey = await Breakdown(q.GroupBy(l => l.ApiKeyName), ct);
 
         return new UsageStats(
-            Total: logs.Count,
-            Success: logs.Count(l => l.Success),
-            Failed: logs.Count(l => !l.Success),
-            PromptTokens: logs.Sum(l => l.PromptTokens),
-            CompletionTokens: logs.Sum(l => l.CompletionTokens),
-            TotalTokens: logs.Sum(l => l.TotalTokens),
-            ReasoningTokens: logs.Sum(l => l.ReasoningTokens),
-            CacheCreationTokens: logs.Sum(l => l.CacheCreationTokens),
-            CacheReadTokens: logs.Sum(l => l.CacheReadTokens),
-            CacheHitCount: logs.Count(l => l.CacheHit),
-            AvgLatencyMs: logs.Count == 0 ? 0 : (long)Math.Round(logs.Average(l => (double)l.LatencyMs)),
-            AvgTtftMs: logs.Where(l => l.TtftMs > 0).Select(l => (long?)l.TtftMs).Average() is { } ttft ? (long)Math.Round((double)ttft) : 0,
-            ByModel: logs.GroupBy(l => l.Model)
-                         .ToDictionary(g => g.Key, g => g.Count()),
-            ByProvider: logs.GroupBy(l => l.ProviderType)
-                           .ToDictionary(g => g.Key, g => g.Count()),
-            ByService: logs.GroupBy(l => l.ServiceName)
-                          .ToDictionary(g => g.Key, g => g.Count()))
+            Total: agg?.Total ?? 0,
+            Success: agg?.Success ?? 0,
+            Failed: (agg?.Total ?? 0) - (agg?.Success ?? 0),
+            PromptTokens: agg?.PromptTokens ?? 0,
+            CompletionTokens: agg?.CompletionTokens ?? 0,
+            TotalTokens: agg?.TotalTokens ?? 0,
+            ReasoningTokens: agg?.ReasoningTokens ?? 0,
+            CacheCreationTokens: agg?.CacheCreationTokens ?? 0,
+            CacheReadTokens: agg?.CacheReadTokens ?? 0,
+            CacheHitCount: agg?.CacheHitCount ?? 0,
+            AvgLatencyMs: agg is null ? 0 : (long)Math.Round(agg.AvgLatency),
+            AvgTtftMs: agg?.AvgTtft is { } t ? (long)Math.Round(t) : 0,
+            ByModel: byModel,
+            ByProvider: byProvider,
+            ByService: byService)
         {
-            ByApiKey = logs.GroupBy(l => l.ApiKeyName)
-                           .ToDictionary(g => g.Key, g => g.Count()),
+            ByApiKey = byApiKey,
         };
     }
+
+    private static async Task<Dictionary<string, int>> Breakdown(
+        IQueryable<IGrouping<string, UsageLogEntity>> grouped, CancellationToken ct) =>
+        (await grouped.Select(g => new { g.Key, C = g.Count() }).ToListAsync(ct))
+            .ToDictionary(x => x.Key, x => x.C);
+
     /// <summary>Per-hour request/token buckets for the dashboard trend chart.
     /// Returns exactly <paramref name="hours"/> buckets ending at the current hour,
     /// including empty ones so the chart has a continuous time axis.</summary>
@@ -162,7 +203,10 @@ public class UsageService : IDisposable
         var now = DateTime.Now;
         var end = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0);
         var start = end.AddHours(-(hours - 1));
-        var logs = await Filtered(db, start, model, service, provider).ToListAsync(ct);
+        // Project only the three columns the buckets need, not full log rows.
+        var logs = await Filtered(db, start, model, service, provider)
+            .Select(l => new { l.Timestamp, l.Success, l.TotalTokens })
+            .ToListAsync(ct);
 
         var byHour = logs.GroupBy(l => new DateTime(l.Timestamp.Year, l.Timestamp.Month,
                 l.Timestamp.Day, l.Timestamp.Hour, 0, 0))
